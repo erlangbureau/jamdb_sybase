@@ -1,0 +1,11 @@
+{application, spacejam_sybase, [
+    {description, "Sybase driver for Spacejam"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib
+    ]},
+    {mod, { spacejam_sybase_app, []}},
+    {env, []}
+ ]}.
