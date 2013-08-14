@@ -115,16 +115,23 @@
     Type =:= ?TDS_TYPE_INT2; 
     Type =:= ?TDS_TYPE_INT4; 
     Type =:= ?TDS_TYPE_INT8;
+    Type =:= ?TDS_TYPE_UINT2; 
+    Type =:= ?TDS_TYPE_UINT4; 
+    Type =:= ?TDS_TYPE_UINT8;
+    Type =:= ?TDS_TYPE_FLT4;
     Type =:= ?TDS_TYPE_FLT8;
     Type =:= ?TDS_TYPE_DATETIME;
+    Type =:= ?TDS_TYPE_SHORTDATE;
     Type =:= ?TDS_TYPE_DATE;
     Type =:= ?TDS_TYPE_TIME;
+    Type =:= ?TDS_TYPE_SHORTMONEY;
     Type =:= ?TDS_TYPE_MONEY
 ).
 
 -define(IS_VAR_LENGTH_TYPE(Type),
     Type =:= ?TDS_TYPE_CHAR;
     Type =:= ?TDS_TYPE_VARCHAR;
+    Type =:= ?TDS_TYPE_BINARY;
     Type =:= ?TDS_TYPE_VARBINARY;
     Type =:= ?TDS_TYPE_INTN;
     Type =:= ?TDS_TYPE_FLTN;
@@ -134,7 +141,7 @@
     Type =:= ?TDS_TYPE_MONEYN
 ).
 
--define(IS_NUMERIC_TYPE(Type),
+-define(IS_DECIMAL_TYPE(Type),
     Type =:= ?TDS_TYPE_NUMN;
     Type =:= ?TDS_TYPE_DECN
 ).
@@ -179,8 +186,8 @@
 -define(USER_TYPE_UNICHAR, 34).
 -define(USER_TYPE_UNIVARCHAR, 35).
 -define(USER_TYPE_UNITEXT, 36).
--define(USER_TYPE_DATE1, 37).
--define(USER_TYPE_TIME1, 38).
+-define(USER_TYPE_LONGDATE, 37).
+-define(USER_TYPE_LONGTIME, 38).
 -define(USER_TYPE_INTERVAL, 39).
 -define(USER_TYPE_DATEN, 40).
 -define(USER_TYPE_TIMEN, 41).
@@ -189,8 +196,8 @@
 -define(USER_TYPE_UINT, 45).
 -define(USER_TYPE_UBIGINT, 46).
 -define(USER_TYPE_XML, 47).
--define(USER_TYPE_DATE2, 50).
--define(USER_TYPE_TIME2, 51).
+-define(USER_TYPE_DATE, 50).
+-define(USER_TYPE_TIME, 51).
 -define(USER_TYPE_UNSIGNED_SHORT, 52).
 -define(USER_TYPE_UNSIGNED_INT, 53).
 -define(USER_TYPE_UNSIGNED_LONG, 54).

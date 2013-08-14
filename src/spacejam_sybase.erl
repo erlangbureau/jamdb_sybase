@@ -14,7 +14,6 @@
 -define(PKT_SIZE, 512).
 -define(MAX_PKT_SIZE, 1024).
 
-
 -record(sybase_client, {
 	socket = undefined,
     state = disconnected :: disconnected | connected | auth,
@@ -32,36 +31,32 @@
     ]
 }).
 
--record(rowformat, {
-    column_name,
-    obj_name,
-    status,
-    usertype,
-    datatype,
-    fixed_length = false :: boolean(),
-    scale,
-    precision,
-    locale
-}).
+-opaque state() :: #sybase_client{}.
+-export_type([state/0]).
 
+-spec connect(string(), inet:port_number(), string(), string(), string())
+    -> {ok, state()} | {error, binary()}.
 connect(Host, Port, User, Password, Database) ->
     GenTcpOpts = [binary, {active, false}, {packet, raw}], 
     {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts),
     State = #sybase_client{socket=Socket},
     {ok, State2} = send_auth_req(Host, User, Password, State),
     case handle_resp(State2) of
-        {ok, _, State3 = #sybase_client{state = auth}} ->
+        {ok, _, _State3 = #sybase_client{state = auth}} ->
             %%TODO Negotiate
-            {error, State3};
+            {error, <<"Auth Negotiate">>};
         {ok, _, State3} ->
             {ok, _, State4} = sql_query(["use ", Database], State3),
             {ok, State4}
     end.
 
+-spec sql_query(string(), state()) -> {ok, integer(), state()} | 
+    {result, [list()], state()} | {error, binary()}.
 sql_query(Query, State = #sybase_client{state = connected}) ->
     {ok, State2} = send_query_req(Query, State),
     handle_resp(State2).
 
+-spec close(state()) -> {ok, state()}.
 close(State = #sybase_client{state = connected, socket=Socket}) ->
     {ok, State2} = send(?QUERRY_PKT, <<?TOKEN_LOGOUT, 0>>, State),
     {ok, _, State3} = handle_resp(State2),
@@ -75,6 +70,11 @@ send_auth_req(ServerName, User, Password, State) ->
     Data = ?LOGIN_RECORD(ClientHostName, ClientProcessId, 
                 User, Pass, ServerName, "", "", ?MAX_PKT_SIZE),
     send(?LOGIN_PKT, Data, State).
+
+encode_char_field(Data, FieldLength) ->
+    ActualLength = byte_size(Data),
+    EmptyLength = (FieldLength - ActualLength) * 8, 
+    <<Data:ActualLength/binary, 0:EmptyLength, ActualLength>>.
 
 send_query_req(Query, State) ->
     BinaryQuery = unicode:characters_to_binary(Query),   %% TODO charset
@@ -158,13 +158,14 @@ parse_token(<<TokenId, TokenData:8/binary, Rest/binary>>, State) when
         TokenId =:= ?TOKEN_DONEINPROC; 
         TokenId =:= ?TOKEN_DONEPROC ->
     parse_done_token(TokenData, Rest, State);
-parse_token(<<Token, Rest/binary>>, _State) ->
-    io:format("Unknown Token: ~p RestData: ~p~n", [Token, Rest]),
+parse_token(<<Token, _Rest/binary>>, _State) ->
+    %io:format("Unknown Token: ~p RestData: ~p~n", [Token, _Rest]),
     {error, unknown_token, Token}.
 
-parse_capability_token(<<1, ReqLen, _Req:ReqLen/binary, 2, RespLen, _Resp:RespLen/binary, Rest1/binary>>, Rest2, State) ->
-    io:format("ReqCapability: ~p~n", [_Req]),
-    io:format("RespCapability: ~p~n", [_Resp]),
+parse_capability_token(<<1, ReqLen, _Req:ReqLen/binary, 
+        2, RespLen, _Resp:RespLen/binary, Rest1/binary>>, Rest2, State) ->
+    %io:format("ReqCapability: ~p~n", [_Req]),
+    %io:format("RespCapability: ~p~n", [_Resp]),
     Rest = <<Rest1/binary, Rest2/binary>>,  %% Sybase 11.0 and higer return 
                                             %% the wrong token length 
                                             %% in the capability packet
@@ -206,50 +207,39 @@ parse_control_fmt(<<Length, Fmt:Length/binary, Rest/binary>>, Fmts) ->
 parse_control_fmt(<<>>, Fmts) ->
     lists:reverse(Fmts).
 
-parse_row_token(TokenData, State=#sybase_client{tokens_buffer=TokensBufer}) ->
+parse_row_token(TokenData, #sybase_client{tokens_buffer=TokensBufer} = State) ->
     {rowfmt_token, _ColsNum, RowsFmt} = get_token(rowfmt_token, TokensBufer),
-    {Rows, Rest} = parse_row(TokenData, RowsFmt, []),
+    {Rows, Rest} = parse_row(RowsFmt, TokenData, []),
     {ok, {row_token, Rows}, State, Rest}.
     
-parse_row(Data, [#rowformat{datatype = TdsType, usertype = UserType, 
-        fixed_length = true}|RowsFmt], Rows) ->
+parse_row([#rowformat{fixed_length=true, tdstype=TdsType, erlangtype=ErlType}
+        | RowsFmt], Data, Rows) ->
     Length = get_data_length(TdsType),
-    ErlangType = usertype_to_erlang_type(UserType),
-    case Data of
-        <<BinValue:Length/binary, Rest/binary>> ->
-            Value = convert_type(BinValue, ErlangType),
-            parse_row(Rest, RowsFmt, [Value|Rows])
-    end;
-parse_row(Data, [#rowformat{datatype = TdsType, usertype = UserType, 
-        fixed_length = false, 
-        scale = Scale}|RowsFmt], Rows) when ?IS_NUMERIC_TYPE(TdsType) ->
-    ErlangType = usertype_to_erlang_type(UserType),
-    case Data of
-        <<Length, BinValue:Length/binary, Rest/binary>> ->
-            Value = convert_decimal(BinValue, ErlangType, Scale),
-            parse_row(Rest, RowsFmt, [Value|Rows])
-    end;
-parse_row(Data, [#rowformat{datatype = TdsType, usertype = UserType, 
-        fixed_length = false}|RowsFmt], Rows) when ?IS_TEXT_OR_IMAGE_TYPE(TdsType) ->
-    ErlangType = usertype_to_erlang_type(UserType),
+    <<BinValue:Length/binary, Rest/binary>> = Data,
+    Value = convert_type(BinValue, ErlType),
+    parse_row(RowsFmt, Rest, [Value|Rows]);
+parse_row([#rowformat{fixed_length=false, tdstype=TdsType, erlangtype=ErlType,
+        scale=Scale} | RowsFmt], Data, Rows) when ?IS_DECIMAL_TYPE(TdsType) ->
+    <<Length, BinValue:Length/binary, Rest/binary>> = Data,
+    Value = convert_decimal(BinValue, ErlType, Scale),
+    parse_row(RowsFmt, Rest, [Value|Rows]);
+parse_row([#rowformat{fixed_length=false, tdstype=TdsType, erlangtype=ErlType}
+        | RowsFmt], Data, Rows) when ?IS_TEXT_OR_IMAGE_TYPE(TdsType) ->
     case Data of
         <<0, Rest/binary>> ->
-            Value = convert_type(<<>>, ErlangType),
-            parse_row(Rest, RowsFmt, [Value|Rows]);
+            Value = convert_type(<<>>, ErlType),
+            parse_row(RowsFmt, Rest, [Value|Rows]);
         <<TxtPtrLen, _TxtPtr:TxtPtrLen/binary, 
             _TimeStamp:64, Length:32, BinValue:Length/binary, Rest/binary>> ->
-            Value = convert_type(BinValue , ErlangType),
-            parse_row(Rest, RowsFmt, [Value|Rows])
+            Value = convert_type(BinValue, ErlType),
+            parse_row(RowsFmt, Rest, [Value|Rows])
     end;
-parse_row(Data, [#rowformat{usertype = UserType, 
-        fixed_length = false}|RowsFmt], Rows) ->
-    ErlangType = usertype_to_erlang_type(UserType),
-    case Data of
-        <<Length, BinValue:Length/binary, Rest/binary>> ->
-            Value = convert_type(BinValue, ErlangType),
-            parse_row(Rest, RowsFmt, [Value|Rows])
-    end;
-parse_row(Rest, [], Rows) ->
+parse_row([#rowformat{fixed_length=false, erlangtype=ErlType}|RowsFmt], 
+        Data, Rows) ->
+    <<Length, BinValue:Length/binary, Rest/binary>> = Data,
+    Value = convert_type(BinValue, ErlType),
+    parse_row(RowsFmt, Rest, [Value|Rows]);
+parse_row([], Rest, Rows) ->
     {lists:reverse(Rows), Rest}.
 
 parse_rowformat_token(<<ColsNumber:16, TokenRest/binary>>, Rest, State) ->
@@ -259,8 +249,13 @@ parse_rowformat_token(<<ColsNumber:16, TokenRest/binary>>, Rest, State) ->
 parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
         UserType:32/signed, Type, LocaleLength, Locale:LocaleLength/binary, 
         Rest/binary>>, RowsFmt) when ?IS_FIXED_LENGTH_TYPE(Type) ->
-    RowFormat = #rowformat{column_name=ColumnName, status=Status,
-        usertype=UserType, datatype=Type, fixed_length=true, locale=Locale},
+    RowFormat = #rowformat{
+            column_name=ColumnName, 
+            status=Status,
+            erlangtype=usertype_to_erlang_type(UserType), 
+            tdstype=Type, 
+            fixed_length=true, 
+            locale=Locale},
     parse_rowformat(Rest, [RowFormat|RowsFmt]);
 parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
         UserType:32/signed, Type, _DataLength, LocaleLength, 
@@ -269,19 +264,19 @@ parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
     RowFormat = #rowformat{
             column_name=ColumnName, 
             status=Status,
-            usertype=UserType, 
-            datatype=Type, 
+            erlangtype=usertype_to_erlang_type(UserType), 
+            tdstype=Type, 
             locale=Locale},
     parse_rowformat(Rest, [RowFormat|RowsFmt]);
 parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
         UserType:32/signed, Type, _DataLength, Precision, Scale,
         LocaleLength, Locale:LocaleLength/binary, 
-        Rest/binary>>, RowsFmt) when ?IS_NUMERIC_TYPE(Type) ->
+        Rest/binary>>, RowsFmt) when ?IS_DECIMAL_TYPE(Type) ->
     RowFormat = #rowformat{
             column_name=ColumnName, 
             status=Status,
-            usertype=UserType, 
-            datatype=Type, 
+            erlangtype=usertype_to_erlang_type(UserType), 
+            tdstype=Type, 
             precision=Precision, 
             scale=Scale,
             locale=Locale},
@@ -294,8 +289,8 @@ parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
             column_name=ColumnName,
             obj_name = ObjName,
             status=Status,
-            usertype=UserType, 
-            datatype=Type, 
+            erlangtype=usertype_to_erlang_type(UserType),
+            tdstype=Type, 
             locale=Locale},
     parse_rowformat(Rest, [RowFormat|RowsFmt]);
 parse_rowformat(<<>>, RowsFmt) ->
@@ -327,10 +322,18 @@ envchange(<<Type, NewValLen, NewValue:NewValLen/binary,
 envchange(<<>>, State) ->
     State.
 
-encode_char_field(Data, FieldLength) ->
-    ActualLength = byte_size(Data),
-    EmptyLength = (FieldLength - ActualLength) * 8, 
-    <<Data:ActualLength/binary, 0:EmptyLength, ActualLength>>.
+set_env(packet_size = Key, _OldValue, NewValue, 
+        #sybase_client{env=Env1} = State) ->
+    Value = list_to_integer(binary_to_list(NewValue)),
+    Env2 = lists:keystore(Key, 1, Env1, {Key, Value}), 
+    State#sybase_client{env = Env2};
+set_env(Key, _OldValue, NewValue, 
+        #sybase_client{env=Env1} = State) ->
+    Env2 = lists:keystore(Key, 1, Env1, {Key, NewValue}),
+    State#sybase_client{env = Env2}.
+
+get_env(Key, #sybase_client{env = Env}) ->
+    proplists:get_value(Key, Env).
 
 take_tokens(TokenName, TokensBufer, Count) ->
     take_tokens(TokenName, TokensBufer, Count, []).
@@ -355,26 +358,18 @@ take_token(TokenName, TokensBufer) ->
 get_token(TokenName, TokensBufer) ->
     lists:keyfind(TokenName, 1, TokensBufer).
 
-set_env(packet_size = Key, _OldValue, NewValue, State) ->
-    %io:format("change ~p from:~p to:~p~n", [Key, _OldValue, NewValue]),  %%TODO
-    Value = list_to_integer(binary_to_list(NewValue)),
-    Env = State#sybase_client.env,
-    State#sybase_client{env = lists:keystore(Key, 1, Env, {Key, Value})};
-set_env(Key, _OldValue, NewValue, State) ->
-    %io:format("change ~p from:~p to:~p~n", [Key, _OldValue, NewValue]),  %%TODO
-    Env = State#sybase_client.env,
-    State#sybase_client{env = lists:keystore(Key, 1, Env, {Key, NewValue})}.
-
-get_env(Key, State) ->
-    Env = State#sybase_client.env,
-    proplists:get_value(Key, Env).
-
+get_data_length(?TDS_TYPE_UINT2) -> 2;
+get_data_length(?TDS_TYPE_UINT4) -> 4;
+get_data_length(?TDS_TYPE_UINT8) -> 8;
 get_data_length(?TDS_TYPE_INT1) -> 1;
 get_data_length(?TDS_TYPE_INT2) -> 2;
 get_data_length(?TDS_TYPE_INT4) -> 4;
 get_data_length(?TDS_TYPE_INT8) -> 8;
+get_data_length(?TDS_TYPE_FLT4) -> 4;
+get_data_length(?TDS_TYPE_FLT8) -> 8;
 get_data_length(?TDS_TYPE_DATE) -> 4;
 get_data_length(?TDS_TYPE_TIME) -> 4;
+get_data_length(?TDS_TYPE_SHORTDATE) -> 4;
 get_data_length(?TDS_TYPE_DATETIME) -> 8.
 
 usertype_to_erlang_type(?USER_TYPE_CHAR) -> binary;
@@ -393,15 +388,18 @@ usertype_to_erlang_type(?USER_TYPE_UBIGINT) -> 'unsigned-integer';
 usertype_to_erlang_type(?USER_TYPE_UNSIGNED_SHORT) -> 'unsigned-integer';
 usertype_to_erlang_type(?USER_TYPE_UNSIGNED_INT) -> 'unsigned-integer';
 usertype_to_erlang_type(?USER_TYPE_UNSIGNED_LONG) -> 'unsigned-integer';
+usertype_to_erlang_type(?USER_TYPE_FLOAT) -> float;
+usertype_to_erlang_type(?USER_TYPE_REAL) -> float;
 usertype_to_erlang_type(?USER_TYPE_NUMERIC) -> decimal;
 usertype_to_erlang_type(?USER_TYPE_NUMERICN) -> decimal;
 usertype_to_erlang_type(?USER_TYPE_DECIMAL) -> decimal;
 usertype_to_erlang_type(?USER_TYPE_DECIMALN) -> decimal;
 usertype_to_erlang_type(?USER_TYPE_DATETIME) -> datetime;
-usertype_to_erlang_type(?USER_TYPE_DATE1) -> date;
-usertype_to_erlang_type(?USER_TYPE_DATE2) -> date;
-usertype_to_erlang_type(?USER_TYPE_TIME1) -> time;
-usertype_to_erlang_type(?USER_TYPE_TIME2) -> time.
+usertype_to_erlang_type(?USER_TYPE_SMALLDATETIME) -> datetime;
+usertype_to_erlang_type(?USER_TYPE_LONGDATE) -> date;
+usertype_to_erlang_type(?USER_TYPE_DATE) -> date;
+usertype_to_erlang_type(?USER_TYPE_LONGTIME) -> time;
+usertype_to_erlang_type(?USER_TYPE_TIME) -> time.
 
 convert_decimal(<<>>, _DstType, _Scale) ->
     null;
@@ -438,12 +436,26 @@ convert_type(BinValue, integer) ->
     BitLength = bit_size(BinValue),
     <<Value:BitLength/signed>> = BinValue,
     Value;
+convert_type(BinValue, float) ->
+    BitLength = bit_size(BinValue),
+    <<Value:BitLength/float>> = BinValue,
+    Value;
+convert_type(<<DaysSince1900:32, _/binary>>, date) ->
+    calendar:gregorian_days_to_date(693961 + DaysSince1900);
+convert_type(<<_:4/binary, Seconds:32>>, time) ->
+    calendar:seconds_to_time(Seconds div 300);
 convert_type(<<DaysSince1900:32>>, date) ->
     calendar:gregorian_days_to_date(693961 + DaysSince1900);
 convert_type(<<Seconds:32>>, time) ->
     calendar:seconds_to_time(Seconds div 300);
-convert_type(<<Date:32, Time:32>>, datetime) ->
-    {convert_type(Date, date), convert_type(Time, time)}.
+convert_type(<<DaysSince1900:32, Seconds:32>>, datetime) ->
+    Date = calendar:gregorian_days_to_date(693961 + DaysSince1900),
+    Time = calendar:seconds_to_time(Seconds div 300),
+    {Date, Time};
+convert_type(<<DaysSince1900:16, Seconds:16>>, datetime) ->
+    Date = calendar:gregorian_days_to_date(693961 + DaysSince1900),
+    Time = calendar:seconds_to_time(Seconds * 60),
+    {Date, Time}.
 
 send(PacketType, Data, State=#sybase_client{socket=Socket}) ->
     PacketSize = get_env(packet_size, State),

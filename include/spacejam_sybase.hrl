@@ -1,3 +1,15 @@
+-record(rowformat, {
+    column_name,
+    obj_name,
+    status,
+    erlangtype,
+    tdstype,
+    fixed_length = false :: boolean(),
+    scale,
+    precision,
+    locale
+}).
+
 -define(CAPABILITY_STRING, <<
     ?TOKEN_CAPABILITY,
     26:16,  %% Token Length
