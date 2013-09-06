@@ -1,4 +1,4 @@
--module(spacejam_sybase).
+-module(jamdb_sybase).
 
 %% API
 -export([connect/5]).
