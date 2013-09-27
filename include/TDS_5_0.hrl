@@ -120,21 +120,23 @@
     Type =:= ?TDS_TYPE_UINT8;
     Type =:= ?TDS_TYPE_FLT4;
     Type =:= ?TDS_TYPE_FLT8;
-    Type =:= ?TDS_TYPE_DATETIME;
     Type =:= ?TDS_TYPE_SHORTDATE;
+    Type =:= ?TDS_TYPE_DATETIME;
     Type =:= ?TDS_TYPE_DATE;
     Type =:= ?TDS_TYPE_TIME;
+    Type =:= ?TDS_TYPE_BIT;
     Type =:= ?TDS_TYPE_SHORTMONEY;
-    Type =:= ?TDS_TYPE_MONEY
+    Type =:= ?TDS_TYPE_MONEY;
+    Type =:= ?TDS_TYPE_VOID
 ).
 
--define(IS_VAR_LENGTH_TYPE(Type),
+-define(IS_VARIABLE_LENGTH_TYPE(Type),
+    Type =:= ?TDS_TYPE_INTN;
+    Type =:= ?TDS_TYPE_FLTN;
     Type =:= ?TDS_TYPE_CHAR;
     Type =:= ?TDS_TYPE_VARCHAR;
     Type =:= ?TDS_TYPE_BINARY;
     Type =:= ?TDS_TYPE_VARBINARY;
-    Type =:= ?TDS_TYPE_INTN;
-    Type =:= ?TDS_TYPE_FLTN;
     Type =:= ?TDS_TYPE_DATETIMEN;
     Type =:= ?TDS_TYPE_DATEN;
     Type =:= ?TDS_TYPE_TIMEN;
@@ -146,7 +148,7 @@
     Type =:= ?TDS_TYPE_DECN
 ).
 
--define(IS_TEXT_OR_IMAGE_TYPE(Type), 
+-define(IS_BLOB_TYPE(Type), 
     Type =:= ?TDS_TYPE_TEXT;
     Type =:= ?TDS_TYPE_IMAGE
 ).

@@ -9,14 +9,17 @@
 -export([sql_query/2]).
 
 -include("TDS_5_0.hrl").
--include("spacejam_sybase.hrl").
+-include("login.hrl").
 
--define(PKT_SIZE, 512).
+-define(DEF_PKT_SIZE, 512).
 -define(MAX_PKT_SIZE, 1024).
+-define(DEF_CHARSET, <<"">>).
+-define(DEF_LANG, <<"">>).
+-define(DEF_DATABASE, <<"">>).
 
 -record(sybase_client, {
 	socket = undefined,
-    state = disconnected :: disconnected | connected | auth,
+    state = disconnected :: disconnected | connected | auth_negotiate,
 	binary_buffer = <<>> :: binary(),
 	tokens_buffer = [],
 	recv_timeout = 5000 :: timeout(),
@@ -24,11 +27,22 @@
     srv_name,
     srv_version,
     env = [
-        {packet_size, ?PKT_SIZE},
-        {language, <<"">>}, 
-        {charset, <<"">>},
-        {database, <<"">>}
+        {packet_size, ?DEF_PKT_SIZE},
+        {language, ?DEF_LANG},
+        {charset, ?DEF_CHARSET},
+        {database, ?DEF_DATABASE}
     ]
+}).
+
+-record(rowformat, {
+    column_name,
+    obj_name,
+    format :: fixed | variable | blob | decimal,
+    status,
+    erlangtype,
+    tdstype,
+    scale,
+    locale
 }).
 
 -opaque state() :: #sybase_client{}.
@@ -42,7 +56,7 @@ connect(Host, Port, User, Password, Database) ->
     State = #sybase_client{socket=Socket},
     {ok, State2} = send_auth_req(Host, User, Password, State),
     case handle_resp(State2) of
-        {ok, _, _State3 = #sybase_client{state = auth}} ->
+        {ok, _, _State3 = #sybase_client{state = auth_negotiate}} ->
             %%TODO Negotiate
             {error, <<"Auth Negotiate">>};
         {ok, _, State3} ->
@@ -175,7 +189,7 @@ parse_loginack_token(<<Status, TdsVersion:4/binary, SrvNameLen,
         SrvName:SrvNameLen/binary, SrvVersion:4/binary>>, Rest, State) ->
     State2 = case Status of
         ?LOG_SUCCEED -> State#sybase_client{state = connected}; 
-        ?LOG_NEGOTIATE -> State#sybase_client{state = auth};
+        ?LOG_NEGOTIATE -> State#sybase_client{state = auth_negotiate};
         ?LOG_FAIL -> State
     end,
     State3 = State2#sybase_client{tds_ver = TdsVersion,
@@ -212,33 +226,31 @@ parse_row_token(TokenData, #sybase_client{tokens_buffer=TokensBufer} = State) ->
     {Rows, Rest} = parse_row(RowsFmt, TokenData, []),
     {ok, {row_token, Rows}, State, Rest}.
     
-parse_row([#rowformat{fixed_length=true, tdstype=TdsType, erlangtype=ErlType}
+parse_row([#rowformat{format=fixed, tdstype=TdsType, erlangtype=ErlType}
         | RowsFmt], Data, Rows) ->
     Length = get_data_length(TdsType),
     <<BinValue:Length/binary, Rest/binary>> = Data,
     Value = convert_type(BinValue, ErlType),
     parse_row(RowsFmt, Rest, [Value|Rows]);
-parse_row([#rowformat{fixed_length=false, tdstype=TdsType, erlangtype=ErlType,
-        scale=Scale} | RowsFmt], Data, Rows) when ?IS_DECIMAL_TYPE(TdsType) ->
-    <<Length, BinValue:Length/binary, Rest/binary>> = Data,
+parse_row([#rowformat{format=variable, erlangtype=ErlType}
+        | RowsFmt], <<Length, BinValue:Length/binary, Rest/binary>>, Rows) ->
+    Value = convert_type(BinValue, ErlType),
+    parse_row(RowsFmt, Rest, [Value|Rows]);
+parse_row([#rowformat{format=decimal, erlangtype=ErlType, scale=Scale}
+        | RowsFmt], <<Length, BinValue:Length/binary, Rest/binary>>, Rows) ->
     Value = convert_decimal(BinValue, ErlType, Scale),
     parse_row(RowsFmt, Rest, [Value|Rows]);
-parse_row([#rowformat{fixed_length=false, tdstype=TdsType, erlangtype=ErlType}
-        | RowsFmt], Data, Rows) when ?IS_TEXT_OR_IMAGE_TYPE(TdsType) ->
+parse_row([#rowformat{format=blob, erlangtype=ErlType}
+        | RowsFmt], Data, Rows) ->
     case Data of
         <<0, Rest/binary>> ->
             Value = convert_type(<<>>, ErlType),
             parse_row(RowsFmt, Rest, [Value|Rows]);
-        <<TxtPtrLen, _TxtPtr:TxtPtrLen/binary, 
-            _TimeStamp:64, Length:32, BinValue:Length/binary, Rest/binary>> ->
+        <<TxtPtrLen, _TxtPtr:TxtPtrLen/binary, _TimeStamp:64,
+                Length:32, BinValue:Length/binary, Rest/binary>> ->
             Value = convert_type(BinValue, ErlType),
             parse_row(RowsFmt, Rest, [Value|Rows])
     end;
-parse_row([#rowformat{fixed_length=false, erlangtype=ErlType}|RowsFmt], 
-        Data, Rows) ->
-    <<Length, BinValue:Length/binary, Rest/binary>> = Data,
-    Value = convert_type(BinValue, ErlType),
-    parse_row(RowsFmt, Rest, [Value|Rows]);
 parse_row([], Rest, Rows) ->
     {lists:reverse(Rows), Rest}.
 
@@ -251,43 +263,45 @@ parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
         Rest/binary>>, RowsFmt) when ?IS_FIXED_LENGTH_TYPE(Type) ->
     RowFormat = #rowformat{
             column_name=ColumnName, 
+            format=fixed,
             status=Status,
             erlangtype=usertype_to_erlang_type(UserType), 
             tdstype=Type, 
-            fixed_length=true, 
             locale=Locale},
     parse_rowformat(Rest, [RowFormat|RowsFmt]);
 parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
         UserType:32/signed, Type, _DataLength, LocaleLength, 
         Locale:LocaleLength/binary, 
-        Rest/binary>>, RowsFmt) when ?IS_VAR_LENGTH_TYPE(Type) ->
+        Rest/binary>>, RowsFmt) when ?IS_VARIABLE_LENGTH_TYPE(Type) ->
     RowFormat = #rowformat{
             column_name=ColumnName, 
+            format=variable,
             status=Status,
             erlangtype=usertype_to_erlang_type(UserType), 
             tdstype=Type, 
             locale=Locale},
     parse_rowformat(Rest, [RowFormat|RowsFmt]);
 parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
-        UserType:32/signed, Type, _DataLength, Precision, Scale,
-        LocaleLength, Locale:LocaleLength/binary, 
+        UserType:32/signed, Type, _DataLength, _Precision, Scale,
+        LocaleLength, Locale:LocaleLength/binary,
         Rest/binary>>, RowsFmt) when ?IS_DECIMAL_TYPE(Type) ->
     RowFormat = #rowformat{
             column_name=ColumnName, 
+            format=decimal,
             status=Status,
-            erlangtype=usertype_to_erlang_type(UserType), 
+            erlangtype=usertype_to_erlang_type(UserType),
             tdstype=Type, 
-            precision=Precision, 
             scale=Scale,
             locale=Locale},
     parse_rowformat(Rest, [RowFormat|RowsFmt]);
 parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
         UserType:32/signed, Type, _DataLength:32, ObjNameLen:16,
         ObjName:ObjNameLen/binary, LocaleLength, Locale:LocaleLength/binary,
-        Rest/binary>>, RowsFmt) when ?IS_TEXT_OR_IMAGE_TYPE(Type) ->
+        Rest/binary>>, RowsFmt) when ?IS_BLOB_TYPE(Type) ->
     RowFormat = #rowformat{
             column_name=ColumnName,
             obj_name = ObjName,
+            format=blob,
             status=Status,
             erlangtype=usertype_to_erlang_type(UserType),
             tdstype=Type, 
@@ -373,7 +387,9 @@ get_data_length(?TDS_TYPE_SHORTDATE) -> 4;
 get_data_length(?TDS_TYPE_DATETIME) -> 8.
 
 usertype_to_erlang_type(?USER_TYPE_CHAR) -> binary;
+usertype_to_erlang_type(?USER_TYPE_NCHAR) -> binary;
 usertype_to_erlang_type(?USER_TYPE_VARCHAR) -> binary;
+usertype_to_erlang_type(?USER_TYPE_NVARCHAR) -> binary;
 usertype_to_erlang_type(?USER_TYPE_BINARY) -> binary;
 usertype_to_erlang_type(?USER_TYPE_VARBINARY) -> binary;
 usertype_to_erlang_type(?USER_TYPE_TEXT) -> binary;
@@ -400,17 +416,11 @@ usertype_to_erlang_type(?USER_TYPE_LONGDATE) -> date;
 usertype_to_erlang_type(?USER_TYPE_DATE) -> date;
 usertype_to_erlang_type(?USER_TYPE_LONGTIME) -> time;
 usertype_to_erlang_type(?USER_TYPE_TIME) -> time.
+%usertype_to_erlang_type(?USER_TYPE_SMALLMONEY) -> money;
+%usertype_to_erlang_type(?USER_TYPE_MONEY) -> money.
 
 convert_decimal(<<>>, _DstType, _Scale) ->
     null;
-convert_decimal(BinValue, decimal, Scale) ->
-    BitLength = bit_size(BinValue) - 8,
-    case BinValue of
-        <<0:8,Value:BitLength>> ->
-            {decimal, Value, Scale};
-        <<1:8,Value:BitLength>> ->
-            {decimal, -Value, Scale}
-    end;
 convert_decimal(BinValue, integer, _Scale) ->
     BitLength = bit_size(BinValue) - 8,
     case BinValue of
@@ -422,7 +432,15 @@ convert_decimal(BinValue, integer, _Scale) ->
 convert_decimal(BinValue, 'unsigned-integer', _Scale) ->
     BitLength = bit_size(BinValue),
     <<Value:BitLength>> = BinValue,
-    Value.
+    Value;
+convert_decimal(BinValue, decimal, Scale) ->
+    BitLength = bit_size(BinValue) - 8,
+    case BinValue of
+        <<0:8,Value:BitLength>> ->
+            {decimal, Value, Scale};
+        <<1:8,Value:BitLength>> ->
+            {decimal, -Value, Scale}
+    end.
 
 convert_type(<<>>, _DstType) ->
     null; 

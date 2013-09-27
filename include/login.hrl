@@ -1,15 +1,3 @@
--record(rowformat, {
-    column_name,
-    obj_name,
-    status,
-    erlangtype,
-    tdstype,
-    fixed_length = false :: boolean(),
-    scale,
-    precision,
-    locale
-}).
-
 -define(CAPABILITY_STRING, <<
     ?TOKEN_CAPABILITY,
     26:16,  %% Token Length
@@ -198,7 +186,6 @@
     0:1,    %% 02:No support for TDS_EED token
     0:1     %% 01:No support for TDS_MSG results
 >>).
-
 
 -define(LOGIN_RECORD(ClientHostName, ClientProcessId, 
                     User, Pass, ServerName, Language, Charset, PktSize), <<
