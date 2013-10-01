@@ -132,6 +132,7 @@
 
 -define(IS_VARIABLE_LENGTH_TYPE(Type),
     Type =:= ?TDS_TYPE_INTN;
+    Type =:= ?TDS_TYPE_UINTN;
     Type =:= ?TDS_TYPE_FLTN;
     Type =:= ?TDS_TYPE_CHAR;
     Type =:= ?TDS_TYPE_VARCHAR;

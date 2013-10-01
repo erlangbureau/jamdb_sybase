@@ -12,9 +12,8 @@
 -include("login.hrl").
 
 -define(DEF_PKT_SIZE, 512).
--define(MAX_PKT_SIZE, 1024).
 -define(DEF_CHARSET, <<"">>).
--define(DEF_LANG, <<"">>).
+-define(DEF_LANG, <<"us_english">>).
 -define(DEF_DATABASE, <<"">>).
 
 -record(sybase_client, {
@@ -54,7 +53,7 @@ connect(Host, Port, User, Password, Database) ->
     GenTcpOpts = [binary, {active, false}, {packet, raw}], 
     {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts),
     State = #sybase_client{socket=Socket},
-    {ok, State2} = send_auth_req(Host, User, Password, State),
+    {ok, State2} = send_auth_req(User, Password, "", State),
     case handle_resp(State2) of
         {ok, _, _State3 = #sybase_client{state = auth_negotiate}} ->
             %%TODO Negotiate
@@ -78,12 +77,17 @@ close(State = #sybase_client{state = connected, socket=Socket}) ->
     {ok, State3#sybase_client{socket=undefined, state = disconnected}}.
 
 %% internal
-send_auth_req(ServerName, User, Password, State) ->
+send_auth_req(User, Password, Charset, State) ->
     {ok, ClientHostName} = inet:gethostname(),
-    ClientProcessId = lists:flatten(io_lib:format("~p",[self()])),
-    Data = ?LOGIN_RECORD(ClientHostName, ClientProcessId, 
-                User, Pass, ServerName, "", "", ?MAX_PKT_SIZE),
+    ClientPID = lists:flatten(io_lib:format("~p",[self()])),
+    Data = ?LOGIN_RECORD(ClientHostName, ClientPID, User, Pass, Charset),
     send(?LOGIN_PKT, Data, State).
+
+encode_remote_password_array(Password) ->
+    SrvNameLen = 0, %% mean universal password
+    PasswordLen = byte_size(Password),
+    Data = <<SrvNameLen:8, PasswordLen:8, Password:PasswordLen/binary>>,
+    encode_char_field(Data, 255).
 
 encode_char_field(Data, FieldLength) ->
     ActualLength = byte_size(Data),
@@ -480,13 +484,13 @@ send(PacketType, Data, State=#sybase_client{socket=Socket}) ->
     DataSize = PacketSize - 8,
     case Data of
         <<PacketData:DataSize/binary, RestData/binary>> ->
-            ok = gen_tcp:send(Socket, 
-                <<PacketType:8, 0:8, PacketSize:16, 0:32, PacketData/binary>>),
+            Pkt = <<PacketType:8, 0:8, PacketSize:16, 0:32, PacketData/binary>>,
+            ok = gen_tcp:send(Socket, Pkt), 
             send(PacketType, RestData, State);
         _ ->
             Length = 8 + byte_size(Data),
-            ok = gen_tcp:send(Socket, 
-                <<PacketType:8, 1:8, Length:16, 0:32, Data/binary>>),
+            Pkt = <<PacketType:8, 1:8, Length:16, 0:32, Data/binary>>,
+            ok = gen_tcp:send(Socket, Pkt),
             {ok, State}
     end.
 
