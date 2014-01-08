@@ -1,12 +1,13 @@
 -module(jamdb_sybase).
 
 %% API
--export([connect/5]).
--export([close/1]).
-%-export([prepare/3]).
-%-export([unprepare/2]).
-%-export([execute/3]).
+-export([connect/5, close/1]).
 -export([sql_query/2]).
+%-export([prepare/3, unprepare/2]).
+%-export([execute/3]).
+-export([get_resultsets/1]).
+-export([get_returnvalues/1]).
+-export([get_rowscount/1]).
 
 -include("TDS_5_0.hrl").
 -include("login.hrl").
@@ -21,6 +22,9 @@
     state = disconnected :: disconnected | connected | auth_negotiate,
 	binary_buffer = <<>> :: binary(),
 	tokens_buffer = [],
+    resultsets = [],
+    returnvalues = [],
+    rowscount = 0,
 	recv_timeout = 5000 :: timeout(),
     tds_ver,
     srv_name,
@@ -55,19 +59,12 @@ connect(Host, Port, User, Password, Database) ->
     State = #sybase_client{socket=Socket},
     {ok, State2} = send_auth_req(User, Password, "", State),
     case handle_resp(State2) of
-        {ok, _, _State3 = #sybase_client{state = auth_negotiate}} ->
+        {ok, State3 = #sybase_client{state = auth_negotiate}} ->
             %%TODO Negotiate
-            {error, <<"Auth Negotiate">>};
-        {ok, _, State3} ->
-            {ok, _, State4} = sql_query(["use ", Database], State3),
-            {ok, State4}
+            {error, <<"Auth Negotiate">>, State3};
+        {ok, State3} ->
+            sql_query(["use ", Database], State3)
     end.
-
--spec sql_query(string(), state()) -> {ok, integer(), state()} | 
-    {result, [list()], state()} | {error, binary()}.
-sql_query(Query, State = #sybase_client{state = connected}) ->
-    {ok, State2} = send_query_req(Query, State),
-    handle_resp(State2).
 
 -spec close(state()) -> {ok, state()}.
 close(State = #sybase_client{state = connected, socket=Socket}) ->
@@ -75,6 +72,20 @@ close(State = #sybase_client{state = connected, socket=Socket}) ->
     {ok, _, State3} = handle_resp(State2),
     ok = gen_tcp:close(Socket),
     {ok, State3#sybase_client{socket=undefined, state = disconnected}}.
+
+-spec sql_query(string(), state()) -> {ok, state()} | {error, binary(), state()}.
+sql_query(Query, State = #sybase_client{state = connected}) ->
+    {ok, State2} = send_query_req(Query, State),
+    handle_resp(State2).
+
+get_resultsets(State) ->
+    State#sybase_client.resultsets.
+
+get_returnvalues(State) ->
+    State#sybase_client.returnvalues.
+
+get_rowscount(State) ->
+    State#sybase_client.rowscount.
 
 %% internal
 send_auth_req(User, Password, Charset, State) ->
@@ -102,49 +113,60 @@ send_query_req(Query, State) ->
 
 handle_resp(State) ->
     {ok, BinaryData, State2} = recv(State),
-    handle_resp(State2, BinaryData, []).
+    handle_resp(State2, BinaryData).
 
-handle_resp(State = #sybase_client{tokens_buffer=TokensBufer}, Data, ResultSets) ->
+handle_resp(State = #sybase_client{tokens_buffer=TokensBufer}, Data) ->
     case parse_token(Data, State) of
         {ok, {done_token, StatusFlags, _, AffectedRows}, State2, RestData} ->
             TokensBufer2 = lists:reverse(TokensBufer),
-            case result(StatusFlags, AffectedRows, TokensBufer2, ResultSets) of
-                {more, TokensBufer3, ResultSets2}  ->
+            case result(StatusFlags, AffectedRows, TokensBufer2, State2) of
+                {more, TokensBufer3, State3} ->
                     TokensBufer4 = lists:reverse(TokensBufer3),
-                    State3 = State2#sybase_client{tokens_buffer=TokensBufer4},
-                    handle_resp(State3, RestData, ResultSets2);
+                    State4 = State3#sybase_client{tokens_buffer=TokensBufer4},
+                    handle_resp(State4, RestData);
                 Result ->
-                    State3 = State2#sybase_client{tokens_buffer=[]},
-                    erlang:append_element(Result, State3)
+                    Result
             end;
         {ok, TokenTuple, State2, RestData} ->
             State3 = State2#sybase_client{tokens_buffer=[TokenTuple|TokensBufer]},
-            handle_resp(State3, RestData, ResultSets);
+            handle_resp(State3, RestData);
         {ok, State2, RestData} ->
-            handle_resp(State2, RestData, ResultSets)
+            handle_resp(State2, RestData)
     end.
 
-result([more|_], _AffectedRows, TokensBufer, ResultSets) ->
-    {more, TokensBufer, ResultSets};
-result([count|RestFlags], AffectedRows, TokensBufer, ResultSets) ->
+result([more|_], _AffectedRows, TokensBufer, State) ->
+    {more, TokensBufer, State};
+result([count|RestFlags], AffectedRows, TokensBufer, State) ->
+    ResultSets = State#sybase_client.resultsets,
     case take_token(rowfmt_token, TokensBufer) of
-        {{rowfmt_token, _, RowsFmt}, TokensBufer2} ->
+        {{rowfmt_token, RowsFmt}, TokensBufer2} ->
             FieldNames = [Fmt#rowformat.column_name || Fmt <- RowsFmt],
             {TokensList, TokensBufer3} = 
                 take_tokens(row_token, TokensBufer2, AffectedRows),
             Rows = [Row || {row_token, Row} <- TokensList],
             ResultSets2 = [{result_set, FieldNames, Rows}|ResultSets],
-            result(RestFlags, AffectedRows, TokensBufer3, ResultSets2);
+            State2 = State#sybase_client{resultsets = ResultSets2},
+            result(RestFlags, AffectedRows, TokensBufer3, State2);
         false ->
-            result(RestFlags, AffectedRows, TokensBufer, [])
+            result(RestFlags, AffectedRows, TokensBufer, State)
     end;
-result([], AffectedRows, _TokensBufer, []) ->
-    {ok, AffectedRows};
-result([], _AffectedRows, _TokensBufer, ResultSets) ->
-    {result, lists:reverse(ResultSets)};
-result([error|_RestFlags], _AffectedRows, TokensBufer, _ResultSets) ->
+result([], AffectedRows, TokensBufer, #sybase_client{resultsets=[]} = State) ->
+    State2 = State#sybase_client{rowscount=AffectedRows},
+    State3 = set_returntvalues(TokensBufer, State2),
+    {ok, State3#sybase_client{tokens_buffer=[]}};
+result([], _AffectedRows, TokensBufer, State) ->
+    ResultSets = State#sybase_client.resultsets,
+    State2 = State#sybase_client{resultsets = lists:reverse(ResultSets)},
+    State3 = set_returntvalues(TokensBufer, State2),
+    {ok, State3#sybase_client{tokens_buffer=[]}};
+result([error|_RestFlags], _AffectedRows, TokensBufer, State) ->
     {{eed_token, ErrorData}, _} = take_token(eed_token, TokensBufer),
-    {error, ErrorData}.
+    {error, ErrorData, State#sybase_client{tokens_buffer=[]}}.
+
+set_returntvalues(TokensBufer, State) ->
+    {Result, _RestTokensBufer} = take_all_tokens(returnvalue_token, TokensBufer),
+    ReturnValues = [Value || {returnvalue_token, Value} <- Result],
+    State#sybase_client{returnvalues = ReturnValues}.
 
 parse_packet_header(<<?RESPONSE_PKT, Status, PacketSize:16, 0:32, Rest/bits>>) ->
     {ok, Status, <<(PacketSize-8):16, Rest/binary>>};
@@ -169,6 +191,8 @@ parse_token(<<?TOKEN_ROW, Rest/binary>>, State) ->
     parse_row_token(Rest, State);
 parse_token(<<?TOKEN_PARAMS, Rest/binary>>, State) ->
     parse_row_token(Rest, State);   %% TODO ?
+parse_token(<<?TOKEN_RETURNVALUE, Len:16, TokenData:Len/binary, Rest/binary>>, State) ->
+    parse_returnvalue_token(TokenData, Rest, State);
 parse_token(<<?TOKEN_RETURNSTATUS, TokenData:4/binary, Rest/binary>>, State) ->
     parse_returnstatus_token(TokenData, Rest, State);
 parse_token(<<TokenId, TokenData:8/binary, Rest/binary>>, State) when 
@@ -213,6 +237,11 @@ parse_done_token(<<Status:16, TransState:16, AffectedRows:32>>, Rest, State) ->
     Flags = [K || {K, V} <- StatusFlags, V],
     {ok, {done_token, Flags, TransState, AffectedRows}, State, Rest}.
 
+parse_returnvalue_token(TokenData, Rest, State) ->
+    {RowFormat, Rest2} = parse_returnformat(TokenData),
+    {[Value], <<>>} = parse_row([RowFormat], Rest2, []),
+    {ok, {returnvalue_token, Value}, State, Rest}.
+
 parse_returnstatus_token(<<Value:32/signed>>, Rest, State) ->
     {ok, {returnstatus_token, Value}, State, Rest}.
 
@@ -226,7 +255,7 @@ parse_control_fmt(<<>>, Fmts) ->
     lists:reverse(Fmts).
 
 parse_row_token(TokenData, #sybase_client{tokens_buffer=TokensBufer} = State) ->
-    {rowfmt_token, _ColsNum, RowsFmt} = get_token(rowfmt_token, TokensBufer),
+    {rowfmt_token, RowsFmt} = get_token(rowfmt_token, TokensBufer),
     {Rows, Rest} = parse_row(RowsFmt, TokenData, []),
     {ok, {row_token, Rows}, State, Rest}.
     
@@ -258,61 +287,60 @@ parse_row([#rowformat{format=blob, erlangtype=ErlType}
 parse_row([], Rest, Rows) ->
     {lists:reverse(Rows), Rest}.
 
-parse_rowformat_token(<<ColsNumber:16, TokenRest/binary>>, Rest, State) ->
+parse_rowformat_token(<<_ColsNumber:16, TokenRest/binary>>, Rest, State) ->
     RowsFmt = parse_rowformat(TokenRest, []),
-    {ok, {rowfmt_token, ColsNumber, RowsFmt}, State, Rest}.
+    {ok, {rowfmt_token, RowsFmt}, State, Rest}.
 
-parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
-        UserType:32/signed, Type, LocaleLength, Locale:LocaleLength/binary, 
-        Rest/binary>>, RowsFmt) when ?IS_FIXED_LENGTH_TYPE(Type) ->
-    RowFormat = #rowformat{
-            column_name=ColumnName, 
-            format=fixed,
-            status=Status,
-            erlangtype=usertype_to_erlang_type(UserType), 
-            tdstype=Type, 
-            locale=Locale},
-    parse_rowformat(Rest, [RowFormat|RowsFmt]);
-parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
-        UserType:32/signed, Type, _DataLength, LocaleLength, 
-        Locale:LocaleLength/binary, 
-        Rest/binary>>, RowsFmt) when ?IS_VARIABLE_LENGTH_TYPE(Type) ->
-    RowFormat = #rowformat{
-            column_name=ColumnName, 
-            format=variable,
-            status=Status,
-            erlangtype=usertype_to_erlang_type(UserType), 
-            tdstype=Type, 
-            locale=Locale},
-    parse_rowformat(Rest, [RowFormat|RowsFmt]);
-parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
-        UserType:32/signed, Type, _DataLength, _Precision, Scale,
-        LocaleLength, Locale:LocaleLength/binary,
-        Rest/binary>>, RowsFmt) when ?IS_DECIMAL_TYPE(Type) ->
-    RowFormat = #rowformat{
-            column_name=ColumnName, 
-            format=decimal,
-            status=Status,
-            erlangtype=usertype_to_erlang_type(UserType),
-            tdstype=Type, 
-            scale=Scale,
-            locale=Locale},
-    parse_rowformat(Rest, [RowFormat|RowsFmt]);
-parse_rowformat(<<ColumnNameLength, ColumnName:ColumnNameLength/binary, Status,
-        UserType:32/signed, Type, _DataLength:32, ObjNameLen:16,
-        ObjName:ObjNameLen/binary, LocaleLength, Locale:LocaleLength/binary,
-        Rest/binary>>, RowsFmt) when ?IS_BLOB_TYPE(Type) ->
-    RowFormat = #rowformat{
-            column_name=ColumnName,
-            obj_name = ObjName,
-            format=blob,
-            status=Status,
-            erlangtype=usertype_to_erlang_type(UserType),
-            tdstype=Type, 
-            locale=Locale},
-    parse_rowformat(Rest, [RowFormat|RowsFmt]);
 parse_rowformat(<<>>, RowsFmt) ->
-    lists:reverse(RowsFmt).
+    lists:reverse(RowsFmt);
+parse_rowformat(Data, RowsFmt) ->
+    {RowFormat, Rest} = parse_returnformat(Data),
+    <<LocaleLength, Locale:LocaleLength/binary, Rest2/binary>> = Rest,
+    RowFormat2 = RowFormat#rowformat{locale = Locale},
+    parse_rowformat(Rest2, [RowFormat2|RowsFmt]).
+
+parse_returnformat(<<ColNameLen, ColName:ColNameLen/binary, Status, 
+        UserType:32/signed, Type, 
+        Rest/binary>>) when ?IS_FIXED_LENGTH_TYPE(Type) ->
+    RowFormat = #rowformat{
+        column_name=ColName, 
+        format=fixed,
+        status=Status,
+        erlangtype=usertype_to_erlang_type(UserType), 
+        tdstype=Type},
+    {RowFormat, Rest};
+parse_returnformat(<<ColNameLen, ColName:ColNameLen/binary, Status,
+        UserType:32/signed, Type, _DataLength, 
+        Rest/binary>>) when ?IS_VARIABLE_LENGTH_TYPE(Type) ->
+    RowFormat = #rowformat{
+        column_name=ColName, 
+        format=variable,
+        status=Status,
+        erlangtype=usertype_to_erlang_type(UserType), 
+        tdstype=Type},
+    {RowFormat, Rest};
+parse_returnformat(<<ColNameLen, ColName:ColNameLen/binary, Status,
+        UserType:32/signed, Type, _DataLength, _Precision, Scale,
+        Rest/binary>>) when ?IS_DECIMAL_TYPE(Type) ->
+    RowFormat = #rowformat{
+        column_name=ColName, 
+        format=decimal,
+        status=Status,
+        erlangtype=usertype_to_erlang_type(UserType),
+        tdstype=Type, 
+        scale=Scale},
+    {RowFormat, Rest};
+parse_returnformat(<<ColNameLen, ColName:ColNameLen/binary, Status,
+        UserType:32/signed, Type, _DataLength:32, ObjNameLen:16,
+        ObjName:ObjNameLen/binary, Rest/binary>>) when ?IS_BLOB_TYPE(Type) ->
+    RowFormat = #rowformat{
+        column_name=ColName,
+        obj_name = ObjName,
+        format=blob,
+        status=Status,
+        erlangtype=usertype_to_erlang_type(UserType),
+        tdstype=Type},
+    {RowFormat, Rest}.
 
 parse_eed_token(<<MsgNumber:32, MsgState, Class, SQLStateLen, 
         SQLState:SQLStateLen/binary, Status, TransactionState:16,
@@ -352,6 +380,17 @@ set_env(Key, _OldValue, NewValue,
 
 get_env(Key, #sybase_client{env = Env}) ->
     proplists:get_value(Key, Env).
+
+take_all_tokens(TokenName, TokensBufer) ->
+    take_all_tokens(TokenName, TokensBufer, []).
+
+take_all_tokens(TokenName, TokensBufer, Result) ->
+    case take_token(TokenName, TokensBufer) of
+        {TokenTuple, TokensBufer2} ->
+            take_all_tokens(TokenName, TokensBufer2, [TokenTuple|Result]);
+        false ->
+            {Result, TokensBufer}
+    end.
 
 take_tokens(TokenName, TokensBufer, Count) ->
     take_tokens(TokenName, TokensBufer, Count, []).

@@ -12,13 +12,22 @@ Connect:
 
 Select:
 ```
-{result, ResultSets, State} = jamdb_sybase:sql_query("select 1, 'test', null", State).
-[{result_set, Columns,Rows}] = ResultSets.
+{ok, State} = jamdb_sybase:sql_query("select 1, 'test', null", State).
+[{result_set, Columns, Rows}] = jamdb_sybase:get_resultsets(State),
+Where:
 [<<>>,<<>>,<<>>] = Columns.
 [[1,<<"test">>,null]] = Rows.
 ```
 
 Update:
 ```
-{ok, UpdatedRows, State} = jamdb_sybase:sql_query("update ....", State).
+{ok, State} = jamdb_sybase:sql_query("update ....", State).
+1 = get_rowscount(State).
+```
+
+Get out parameters:
+```
+{ok, State} = jamdb_sybase:sql_query("exec proc @par1 out, @par2 out", State).
+[<<"Text">>, 1] = get_returnvalues(State).
+
 ```
