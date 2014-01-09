@@ -7,6 +7,7 @@
 %-export([execute/3]).
 -export([get_resultsets/1]).
 -export([get_returnvalues/1]).
+%-export([get_returnstatus/1]).
 -export([get_rowscount/1]).
 
 -include("TDS_5_0.hrl").
@@ -61,7 +62,7 @@ connect(Host, Port, User, Password, Database) ->
     case handle_resp(State2) of
         {ok, State3 = #sybase_client{state = auth_negotiate}} ->
             %%TODO Negotiate
-            {error, <<"Auth Negotiate">>, State3};
+            {error, <<"Auth Negotiate not implemented">>, State3};
         {ok, State3} ->
             sql_query(["use ", Database], State3)
     end.
@@ -69,7 +70,7 @@ connect(Host, Port, User, Password, Database) ->
 -spec close(state()) -> {ok, state()}.
 close(State = #sybase_client{state = connected, socket=Socket}) ->
     {ok, State2} = send(?QUERRY_PKT, <<?TOKEN_LOGOUT, 0>>, State),
-    {ok, _, State3} = handle_resp(State2),
+    {ok, State3} = handle_resp(State2),
     ok = gen_tcp:close(Socket),
     {ok, State3#sybase_client{socket=undefined, state = disconnected}}.
 
@@ -78,12 +79,15 @@ sql_query(Query, State = #sybase_client{state = connected}) ->
     {ok, State2} = send_query_req(Query, State),
     handle_resp(State2).
 
+-spec get_resultsets(state()) -> [any()].
 get_resultsets(State) ->
     State#sybase_client.resultsets.
 
+-spec get_returnvalues(state()) -> [any()].
 get_returnvalues(State) ->
     State#sybase_client.returnvalues.
 
+-spec get_rowscount(state()) -> integer().
 get_rowscount(State) ->
     State#sybase_client.rowscount.
 
