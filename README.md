@@ -31,3 +31,7 @@ Get out parameters:
 [<<"Text">>, 1] = get_returnvalues(State).
 
 ```
+
+
+[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/kostyushkin/jamdb_sybase/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+
