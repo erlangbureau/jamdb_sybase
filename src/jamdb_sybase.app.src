@@ -6,6 +6,5 @@
         kernel,
         stdlib
     ]},
-    {mod, { jamdb_sybase_app, []}},
     {env, []}
  ]}.

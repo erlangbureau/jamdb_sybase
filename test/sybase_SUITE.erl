@@ -17,7 +17,7 @@
 -export([creaate_procedure/1, execute_procedure/1, drop_procedure/1]).
 
 -define(Host, "127.0.0.1").
--define(Port, 4100).
+-define(Port, 5000).
 -define(Login, "test").
 -define(Password, "TestTest").
 -define(Database, "TEST").
@@ -49,7 +49,7 @@ all() ->
 create_tables(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_int_null_tests( "
             "U_BIG unsigned bigint null, "
             "S_BIG bigint null, "
@@ -61,7 +61,7 @@ create_tables(_Config) ->
             "NUM numeric(38,2) null"
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_int_not_null_tests( "
             "U_BIG unsigned bigint not null, "
             "S_BIG bigint not null, "
@@ -73,7 +73,7 @@ create_tables(_Config) ->
             "NUM numeric(38,2)"
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_char_null_tests( "
             "CHAR char(10) null, "
             "NCHAR nchar(10) null, "
@@ -83,7 +83,7 @@ create_tables(_Config) ->
             "VARBINARY varbinary(10) null "
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_char_not_null_tests( "
             "CHAR char(10) not null, "
             "NCHAR nchar(10) not null, "
@@ -93,31 +93,31 @@ create_tables(_Config) ->
             "VARBINARY varbinary(10) not null"
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_float_null_tests( "
             "FLOAT float null,"
             "REAL real null"
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_float_not_null_tests( "
             "FLOAT float not null,"
             "REAL real not null"
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_money_null_tests( "
             "MONEY money null, "
             "SMALLMONEY smallmoney null"
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_money_not_null_tests( "
             "MONEY money not null, "
             "SMALLMONEY smallmoney not null"
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_time_null_tests( "
             "DATETIME datetime null, "
             "SMALLDATETIME smalldatetime null, "
@@ -125,7 +125,7 @@ create_tables(_Config) ->
             "TIME time null"
         ")"
         },
-        {0, 
+        {[{affected_rows,0}], 
         "create table ERL_DRV_time_not_null_tests( "
             "DATETIME datetime not null, "
             "SMALLDATETIME smalldatetime not null, "
@@ -135,7 +135,7 @@ create_tables(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -144,19 +144,19 @@ create_tables(_Config) ->
 drop_tables(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
-        {0, "drop table ERL_DRV_int_null_tests"},
-        {0, "drop table ERL_DRV_int_not_null_tests"},
-        {0, "drop table ERL_DRV_float_null_tests"},
-        {0, "drop table ERL_DRV_float_not_null_tests"},
-        {0, "drop table ERL_DRV_char_null_tests"},
-        {0, "drop table ERL_DRV_char_not_null_tests"},
-        {0, "drop table ERL_DRV_time_null_tests"},
-        {0, "drop table ERL_DRV_time_not_null_tests"},
-        {0, "drop table ERL_DRV_money_null_tests"},
-        {0, "drop table ERL_DRV_money_not_null_tests"}
+        {[{affected_rows,0}], "drop table ERL_DRV_int_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_int_not_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_float_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_float_not_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_char_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_char_not_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_time_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_time_not_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_money_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_money_not_null_tests"}
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -166,16 +166,16 @@ simple_select(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            [{result_set,[<<>>,<<>>,<<>>],[[1,<<"test">>,null]]}],
+            [{result_set,[<<>>,<<>>,<<>>],[],[[1,<<"test">>,undefined]]}],
             <<"select 1, 'test', null">>
         },
         {   
-            [{result_set,[<<>>,<<>>,<<>>],[[1,<<"test">>,null]]}], 
+            [{result_set,[<<>>,<<>>,<<>>],[], [[1,<<"test">>,undefined]]}],
             <<"select 1, 'test', null">>
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {result, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -185,13 +185,13 @@ insert_integer_types(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_int_null_tests(U_BIG, S_BIG, U_INT, "
                     "S_INT, U_SMALL, S_SMALL, U_TINY, NUM) "
                 "VALUES(null, null, null, null, null, null, null, null)"
         },
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_int_null_tests(U_BIG, S_BIG, U_INT, "
                     "S_INT, U_SMALL, S_SMALL, U_TINY, NUM) "
                 "VALUES(18446744073709551615, -9223372036854775808, "
@@ -199,7 +199,7 @@ insert_integer_types(_Config) ->
                         "999999999999999999999999999999999999.99)"
         },
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_int_not_null_tests(U_BIG, S_BIG, U_INT, "
                     "S_INT, U_SMALL, S_SMALL, U_TINY, NUM) "
                 "VALUES(18446744073709551615, -9223372036854775808, "
@@ -208,7 +208,7 @@ insert_integer_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -219,30 +219,30 @@ select_integer_types(_Config) ->
     Tests = [
         {   
             [{result_set, [<<"U_BIG">>, <<"S_BIG">>, <<"U_INT">>, <<"S_INT">>, 
-                        <<"U_SMALL">>,<<"S_SMALL">>, <<"U_TINY">>, <<"NUM">>],
+                        <<"U_SMALL">>,<<"S_SMALL">>, <<"U_TINY">>, <<"NUM">>], [],
                 [
-                    [null, null, null, null, null, null, null, null],
+                    [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined],
                     [18446744073709551615, -9223372036854775808, 
                         4294967295, -2147483648, 65535, -32768, 255, 
-                        {decimal, 99999999999999999999999999999999999999, 2}]
+                        {numeric, 99999999999999999999999999999999999999, 2}]
                 ]}],
             "select U_BIG, S_BIG, U_INT, S_INT, U_SMALL, S_SMALL, U_TINY, NUM "
                 "from ERL_DRV_int_null_tests"
         },
         {   
             [{result_set, [<<"U_BIG">>, <<"S_BIG">>, <<"U_INT">>, <<"S_INT">>, 
-                            <<"U_SMALL">>, <<"S_SMALL">>, <<"U_TINY">>, <<"NUM">>],
+                            <<"U_SMALL">>, <<"S_SMALL">>, <<"U_TINY">>, <<"NUM">>], [],
                 [
                     [18446744073709551615, -9223372036854775808, 
                         4294967295, -2147483648, 65535, -32768, 255, 
-                        {decimal, 99999999999999999999999999999999999999, 2}]
+                        {numeric, 99999999999999999999999999999999999999, 2}]
                 ]}],
             "select U_BIG, S_BIG, U_INT, S_INT, U_SMALL, S_SMALL, U_TINY, NUM "
                 "from ERL_DRV_int_not_null_tests"
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {result, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -252,38 +252,38 @@ insert_characters_types(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_char_null_tests"
                     "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
                 "VALUES(null, null, null, null, null, null)"
         },
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_char_null_tests"
                     "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
                 "VALUES('a', 't', 'q', 'z', 'test1', 'test2')"
         },
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_char_null_tests"
                     "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
                 "VALUES('', '', '', '', '', '')"
         },
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_char_not_null_tests"
                     "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
                 "VALUES('a', 't', 'q', 'z', 'test1', 'test2')"
         },
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_char_not_null_tests"
                     "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
                 "VALUES('', '', '', '', '', '')"
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -293,27 +293,27 @@ select_characters_types(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>],
+            [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>], [],
                 [
-                    [null, null, null, null, null, null],
-                    [<<"a">>, <<"t">>, <<"q">>, <<"z">>, <<"test1">>, <<"test2">>],
-                    [<<" ">>,<<" ">>,<<" ">>,<<" ">>,<<" ">>,<<" ">>]
+                    [undefined, undefined, undefined, undefined, undefined, undefined],
+                    [<<"a         ">>, <<"t">>, <<"q">>, <<"z">>, <<"test1">>, <<"test2">>],
+                    [<<"          ">>, <<" ">>, <<" ">>, <<" ">>, <<" ">>, <<" ">>]
                 ]}],
             "select CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY "
                 "from ERL_DRV_char_null_tests"
         },
         {   
-            [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>],
+            [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>], [],
                 [
-                    [<<"a         ">>, <<"t         ">>, <<"q">>, <<"z">>, <<"test1",0,0,0,0,0>>, <<"test2">>],
-                    [<<"          ">>, <<"          ">>, <<" ">>, <<" ">>, <<" ",0,0,0,0,0,0,0,0,0>>, <<" ">>]
+                    [<<"a         ">>, <<"t                             ">>, <<"q">>, <<"z">>, <<"test1",0,0,0,0,0>>, <<"test2">>],
+                    [<<"          ">>, <<"                              ">>, <<" ">>, <<" ">>, <<" ",0,0,0,0,0,0,0,0,0>>, <<" ">>]
                 ]}],
             "select CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY "
                 "from ERL_DRV_char_not_null_tests"
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {result, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -322,12 +322,12 @@ select_characters_types(_Config) ->
 insert_float_types(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
-        {1, "insert into ERL_DRV_float_null_tests(FLOAT, REAL) VALUES(null, null)"},
-        {1, "insert into ERL_DRV_float_null_tests(FLOAT, REAL) VALUES(3.14, 3.14)"},
-        {1, "insert into ERL_DRV_float_not_null_tests(FLOAT, REAL) VALUES(-3.14, -3.14)"}
+        {[{affected_rows,1}], "insert into ERL_DRV_float_null_tests(FLOAT, REAL) VALUES(null, null)"},
+        {[{affected_rows,1}], "insert into ERL_DRV_float_null_tests(FLOAT, REAL) VALUES(3.14, 3.14)"},
+        {[{affected_rows,1}], "insert into ERL_DRV_float_not_null_tests(FLOAT, REAL) VALUES(-3.14, -3.14)"}
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -337,21 +337,21 @@ select_float_types(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            [{result_set, [<<"FLOAT">>,<<"REAL">>], [ 
-                [null, null], 
+            [{result_set, [<<"FLOAT">>,<<"REAL">>], [], [ 
+                [undefined, undefined], 
                 [3.14, 3.140000104904175] 
             ]}],
             "select FLOAT, REAL from ERL_DRV_float_null_tests"
         },
         {   
-            [{result_set, [<<"FLOAT">>,<<"REAL">>], [ 
+            [{result_set, [<<"FLOAT">>,<<"REAL">>], [], [ 
                 [-3.14, -3.140000104904175] 
             ]}],
             "select FLOAT, REAL from ERL_DRV_float_not_null_tests"
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {result, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -371,7 +371,7 @@ select_float_types(_Config) ->
 %        }
 %    ],
 %    _ = [{ResultSets, Query} = begin
-%            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+%            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
 %            {RS, Query}
 %        end || {ResultSets, Query} <- Tests],
 %    {ok, _State2} = jamdb_sybase:close(State),
@@ -397,7 +397,7 @@ select_float_types(_Config) ->
 %        }
 %    ],
 %    _ = [{ResultSets, Query} = begin
-%            {result, RS, _} = jamdb_sybase:sql_query(Query, State),
+%            {result, RS, _} = jamdb_sybase:sql_query(State, Query),
 %            {RS, Query}
 %        end || {ResultSets, Query} <- Tests],
 %    {ok, _State2} = jamdb_sybase:close(State),
@@ -407,20 +407,20 @@ insert_time_types(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_time_null_tests(DATETIME, SMALLDATETIME, "
                     "DATE, TIME) "
                 "VALUES(null, null, null, null)"
         },
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_time_null_tests(DATETIME, SMALLDATETIME, "
                     "DATE, TIME) "
                 "VALUES('2013-08-01 16:00:00', '2013-08-01 16:00:00', "
                     "'2013-08-01', '16:00:00')"
         },
         {   
-            1,
+            [{affected_rows,1}],
             "insert into ERL_DRV_time_not_null_tests(DATETIME, SMALLDATETIME, "
                     "DATE, TIME) "
                 "VALUES('2013-08-01 16:00:00', '2013-08-01 16:00:00', "
@@ -428,7 +428,7 @@ insert_time_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -439,11 +439,11 @@ select_time_types(_Config) ->
     Tests = [
         {   
             [{result_set,[<<"DATETIME">>, <<"SMALLDATETIME">>, 
-                            <<"DATE">>, <<"TIME">>],
+                            <<"DATE">>, <<"TIME">>], [],
                         [
-                            [null, null, null, null],
+                            [undefined, undefined, undefined, undefined],
                             [{{2013,8,1},{16,0,0}}, {{2013,8,1},{16,0,0}}, 
-                                {2013,8,1}, {16,0,0}]
+                                {date, {2013,8,1}}, {time, {16,0,0}}]
                         ]
             }],
             "select DATETIME, SMALLDATETIME, DATE, TIME "
@@ -451,17 +451,17 @@ select_time_types(_Config) ->
         },
         {   
             [{result_set,[<<"DATETIME">>, <<"SMALLDATETIME">>, 
-                            <<"DATE">>, <<"TIME">>],
+                            <<"DATE">>, <<"TIME">>], [],
                         [
                             [{{2013,8,1},{16,0,0}}, {{2013,8,1},{16,0,0}}, 
-                                {2013,8,1}, {16,0,0}]
+                                {date, {2013,8,1}}, {time, {16,0,0}}]
                         ]}],
             "select DATETIME, SMALLDATETIME, DATE, TIME "
                 "from ERL_DRV_time_not_null_tests"
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {result, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -472,17 +472,28 @@ creaate_procedure(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            0,
-            "create procedure erl_drv_procedure as "
+            [{affected_rows,0}],
+            "create procedure erl_drv_ok_procedure as "
                 "begin "
-                "select 1 "
-                "select 'b' "
-                "select 'a' "
-            "end"
+                    "select 1 "
+                    "select 'a' "
+                    "select 'b' "
+                "end"
+        },
+        {   
+            [{affected_rows,0}],
+            "create procedure erl_drv_err_procedure as "
+                "begin "
+                    "select 1 "
+                    "select 'a' "
+                    "select 'b' "
+                    "select 'c' "
+                    "return 22 "
+                "end"
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -493,15 +504,26 @@ execute_procedure(_Config) ->
     Tests = [
         {   
             [
-                {result_set,[<<>>], [[1]]},
-                {result_set,[<<>>], [[<<"b">>]]},
-                {result_set,[<<>>], [[<<"a">>]]}
+                {result_set,[<<>>], [], [[1]]},
+                {result_set,[<<>>], [], [[<<"a">>]]},
+                {result_set,[<<>>], [], [[<<"b">>]]},
+                {procedure_result,0,[]}
             ],
-            "exec erl_drv_procedure"
+            "exec erl_drv_ok_procedure"
+        },
+        {   
+            [
+                {result_set,[<<>>], [], [[1]]},
+                {result_set,[<<>>], [], [[<<"a">>]]},
+                {result_set,[<<>>], [], [[<<"b">>]]},
+                {result_set,[<<>>], [], [[<<"c">>]]},
+                {procedure_result,22,[]}
+            ],
+            "exec erl_drv_err_procedure"
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {result, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
@@ -511,12 +533,16 @@ drop_procedure(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            0,
-            "drop procedure erl_drv_procedure"
+            [{affected_rows,0}],
+            "drop procedure erl_drv_ok_procedure"
+        },
+        {   
+            [{affected_rows,0}],
+            "drop procedure erl_drv_err_procedure"
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(Query, State),
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
     {ok, _State2} = jamdb_sybase:close(State),
