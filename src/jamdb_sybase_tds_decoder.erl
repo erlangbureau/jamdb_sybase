@@ -7,7 +7,7 @@
 -include("TDS_5_0.hrl").
 -include("jamdb_sybase.hrl").
 
-%% decode_value_format
+%% decode_data_format
 -define(IS_FIXED_LENGTH_TYPE(TDSType),
     TDSType =:= ?TDS_TYPE_INT1; 
     TDSType =:= ?TDS_TYPE_INT2; 
@@ -135,7 +135,7 @@ decode_token(<<Token, Data/binary>>, TokensBufer) ->
         ?TDS_TOKEN_RETURNVALUE ->   decode_returnvalue_token(Data);
         ?TDS_TOKEN_RETURNSTATUS ->  decode_returnstatus_token(Data);
         _ ->
-            io:format("Unknown Token: ~p Data: ~p~n", [Token, Data]),
+            %io:format("Unknown Token: ~p Data: ~p~n", [Token, Data]),
             {error, unknown_token, Token}
     end.
 
@@ -285,10 +285,11 @@ decode_data_format(<<LNLen, LabelName:LNLen/binary,
                 tdstype     = TdsType,
                 scale       = Scale},
             {Format, Rest2};
-        ?IS_BLOB_TYPE(TdsType) ->
-            <<_DataLen, ONLen:16, ObjName:ONLen/binary, Rest2/binary>> = Rest,
+        TdsType =:= ?TDS_TYPE_TEXT ->
+            io:format("TdsType: ~p, ~p~n", [TdsType, Rest]),
+            <<_DataLen:32, ONLen:16, ObjName:ONLen/binary, Rest2/binary>> = Rest,
             Format = #format{
-                format      = blob,
+                format      = text,
                 label_name  = LabelName,
                 obj_name    = ObjName,
                 status      = Status,
@@ -333,7 +334,7 @@ decode_data(Data, #format{format=decimal, usertype=UserType, scale=Scale}) ->
     <<Length, BinValue:Length/binary, Rest/binary>> = Data,
     Value = decode_value(BinValue, UserType, Scale),
     {Value, Rest};
-decode_data(Data, #format{format=blob, usertype=UserType}) ->
+decode_data(Data, #format{format=text, usertype=UserType}) ->
     case Data of
         <<0, Rest/binary>> ->
             Value = decode_value(<<>>, UserType),

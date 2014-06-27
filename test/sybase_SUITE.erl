@@ -7,9 +7,10 @@
 
 %% Tests
 -export([create_tables/1, drop_tables/1]).
--export([simple_select/1]).
+-export([simple_select/1, empty_select/1]).
 -export([insert_integer_types/1, select_integer_types/1]).
--export([insert_characters_types/1, select_characters_types/1]).
+-export([insert_char_types/1, select_char_types/1]).
+-export([insert_text_type/1, select_text_type/1]).
 -export([insert_float_types/1, select_float_types/1]).
 %-export([insert_money_types/1, select_money_types/1]).
 %-export([insert_blob_types/1, select_blob_types/1]).
@@ -27,14 +28,17 @@ all() ->
 	[
         create_tables, 
         simple_select,
+        empty_select,
         insert_integer_types,
-        insert_characters_types,
+        insert_char_types,
+        insert_text_type,
         insert_float_types,
         %insert_money_types,
         insert_time_types,
         %insert_blob_types,
         select_integer_types,
-        select_characters_types,
+        select_char_types,
+        select_text_type,
         select_float_types,
         %select_money_types,
         select_time_types,
@@ -91,6 +95,16 @@ create_tables(_Config) ->
             "NVARCHAR nvarchar(10) not null, "
             "BINARY binary(10) not null, "
             "VARBINARY varbinary(10) not null"
+        ")"
+        },
+       {[{affected_rows,0}], 
+        "create table ERL_DRV_text_null_tests( "
+            "TEXT text null "
+        ")"
+        },
+        {[{affected_rows,0}], 
+        "create table ERL_DRV_text_not_null_tests( "
+            "TEXT text not null "
         ")"
         },
         {[{affected_rows,0}], 
@@ -150,6 +164,8 @@ drop_tables(_Config) ->
         {[{affected_rows,0}], "drop table ERL_DRV_float_not_null_tests"},
         {[{affected_rows,0}], "drop table ERL_DRV_char_null_tests"},
         {[{affected_rows,0}], "drop table ERL_DRV_char_not_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_text_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_text_not_null_tests"},
         {[{affected_rows,0}], "drop table ERL_DRV_time_null_tests"},
         {[{affected_rows,0}], "drop table ERL_DRV_time_not_null_tests"},
         {[{affected_rows,0}], "drop table ERL_DRV_money_null_tests"},
@@ -172,6 +188,23 @@ simple_select(_Config) ->
         {   
             [{result_set,[<<>>,<<>>,<<>>],[], [[1,<<"test">>,undefined]]}],
             <<"select 1, 'test', null">>
+        }
+    ],
+    _ = [{ResultSets, Query} = begin
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {RS, Query}
+        end || {ResultSets, Query} <- Tests],
+    {ok, _State2} = jamdb_sybase:close(State),
+    ok.
+
+empty_select(_Config) ->
+    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    Tests = [
+        {   
+            [{result_set,[<<"U_BIG">>,<<"S_BIG">>,<<"U_INT">>,
+                                <<"S_INT">>,<<"U_SMALL">>,<<"S_SMALL">>,
+                                <<"U_TINY">>,<<"NUM">>],[],[]}],
+            <<"select U_BIG, S_BIG, U_INT, S_INT, U_SMALL, S_SMALL, U_TINY, NUM from ERL_DRV_int_null_tests">>
         }
     ],
     _ = [{ResultSets, Query} = begin
@@ -248,7 +281,7 @@ select_integer_types(_Config) ->
     {ok, _State2} = jamdb_sybase:close(State),
     ok.
 
-insert_characters_types(_Config) ->
+insert_char_types(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
@@ -289,7 +322,7 @@ insert_characters_types(_Config) ->
     {ok, _State2} = jamdb_sybase:close(State),
     ok.
 
-select_characters_types(_Config) ->
+select_char_types(_Config) ->
     {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
@@ -310,6 +343,91 @@ select_characters_types(_Config) ->
                 ]}],
             "select CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY "
                 "from ERL_DRV_char_not_null_tests"
+        }
+    ],
+    _ = [{ResultSets, Query} = begin
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {RS, Query}
+        end || {ResultSets, Query} <- Tests],
+    {ok, _State2} = jamdb_sybase:close(State),
+    ok.
+
+insert_text_type(_Config) ->
+    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    Tests = [
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_text_null_tests"
+                    "(TEXT) "
+                "VALUES(null)"
+        },
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_text_null_tests"
+                    "(TEXT) "
+                "VALUES('a')"
+        },
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_text_null_tests"
+                    "(TEXT) "
+                "VALUES('test test test')"
+        },
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_text_null_tests"
+                    "(TEXT) "
+                "VALUES('')"
+        },
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_text_not_null_tests"
+                    "(TEXT) "
+                "VALUES('a')"
+        },
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_text_not_null_tests"
+                    "(TEXT) "
+                "VALUES('test test test')"
+        },
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_text_not_null_tests"
+                    "(TEXT) "
+                "VALUES('')"
+        }
+    ],
+    _ = [{ResultSets, Query} = begin
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {RS, Query}
+        end || {ResultSets, Query} <- Tests],
+    {ok, _State2} = jamdb_sybase:close(State),
+    ok.
+
+select_text_type(_Config) ->
+    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    Tests = [
+        {   
+            [{result_set,[<<"TEXT">>], [],
+                [
+                    [undefined],
+                    [<<"a">>],
+                    [<<"test test test">>],
+                    [<<" ">>]
+                ]}],
+            "select TEXT "
+                "from ERL_DRV_text_null_tests"
+        },
+        {   
+            [{result_set,[<<"TEXT">>], [],
+                [
+                    [<<"a">>],
+                    [<<"test test test">>],
+                    [<<" ">>]
+                ]}],
+            "select TEXT "
+                "from ERL_DRV_text_not_null_tests"
         }
     ],
     _ = [{ResultSets, Query} = begin
