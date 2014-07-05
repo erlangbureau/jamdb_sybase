@@ -17,6 +17,12 @@ Getting Started
 -----
 * [Reference Manual on GitHub](https://github.com/kostyushkin/jamdb_sybase/wiki/JamDB-Sybase-Reference-Manual)
 
+TDS Protocol References
+-----
+* [TDS 5.0 Functional Specification Version 3.8 - Sybase](http://www.sybase.com/content/1040983/Sybase-tds38-102306.pdf)
+* [TDS Protocol Documentation - FreeTDS](http://www.freetds.org/tds.html)
+* [jTDS Documentation](http://jtds.sourceforge.net/doc.html)
+
 Alternatives
 -----
 * [Erlang ODBC](http://www.erlang.org/doc/man/odbc.html)
