@@ -1,10 +1,10 @@
 -record(format, {
-    format :: fixed | variable | blob1 | decimal,
+    format :: fixed | variable | long | text | decimal,
     usertype,
     tdstype,
     status,
     db_name,
-    user_name,
+    owner_name,
     table_name,
     label_name,
     column_name,

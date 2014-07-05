@@ -13,8 +13,8 @@
 -export([insert_text_type/1, select_text_type/1]).
 -export([insert_float_types/1, select_float_types/1]).
 %-export([insert_money_types/1, select_money_types/1]).
-%-export([insert_blob_types/1, select_blob_types/1]).
 -export([insert_time_types/1, select_time_types/1]).
+-export([insert_widetable/1, select_widetable/1]).
 -export([creaate_procedure/1, execute_procedure/1, drop_procedure/1]).
 
 -define(Host, "127.0.0.1").
@@ -33,6 +33,7 @@ all() ->
         insert_char_types,
         insert_text_type,
         insert_float_types,
+        insert_widetable,
         %insert_money_types,
         insert_time_types,
         %insert_blob_types,
@@ -40,6 +41,7 @@ all() ->
         select_char_types,
         select_text_type,
         select_float_types,
+        select_widetable,
         %select_money_types,
         select_time_types,
         %select_blob_types,
@@ -95,6 +97,26 @@ create_tables(_Config) ->
             "NVARCHAR nvarchar(10) not null, "
             "BINARY binary(10) not null, "
             "VARBINARY varbinary(10) not null"
+        ")"
+        },
+        {[{affected_rows,0}], 
+        "create table ERL_DRV_widetable_null_tests( "
+            "CHAR char(1000) null, "
+            "NCHAR nchar(1000) null, "
+            "VARCHAR varchar(1000) null, "
+            "NVARCHAR nvarchar(1000) null, "
+            "BINARY binary(1000) null, "
+            "VARBINARY varbinary(1000) null "
+        ")"
+        },
+        {[{affected_rows,0}], 
+        "create table ERL_DRV_widetable_not_null_tests( "
+            "CHAR char(1000) not null, "
+            "NCHAR nchar(1000) not null, "
+            "VARCHAR varchar(1000) not null, "
+            "NVARCHAR nvarchar(1000) not null, "
+            "BINARY binary(1000) not null, "
+            "VARBINARY varbinary(1000) not null"
         ")"
         },
        {[{affected_rows,0}], 
@@ -169,7 +191,9 @@ drop_tables(_Config) ->
         {[{affected_rows,0}], "drop table ERL_DRV_time_null_tests"},
         {[{affected_rows,0}], "drop table ERL_DRV_time_not_null_tests"},
         {[{affected_rows,0}], "drop table ERL_DRV_money_null_tests"},
-        {[{affected_rows,0}], "drop table ERL_DRV_money_not_null_tests"}
+        {[{affected_rows,0}], "drop table ERL_DRV_money_not_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_widetable_null_tests"},
+        {[{affected_rows,0}], "drop table ERL_DRV_widetable_not_null_tests"}
     ],
     _ = [{ResultSets, Query} = begin
             {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
@@ -343,6 +367,83 @@ select_char_types(_Config) ->
                 ]}],
             "select CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY "
                 "from ERL_DRV_char_not_null_tests"
+        }
+    ],
+    _ = [{ResultSets, Query} = begin
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {RS, Query}
+        end || {ResultSets, Query} <- Tests],
+    {ok, _State2} = jamdb_sybase:close(State),
+    ok.
+
+insert_widetable(_Config) ->
+    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    LongAsciiString = << <<"a">> || _ <- lists:seq(1,1000)>>,
+    Tests = [
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_widetable_null_tests"
+                    "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
+                "VALUES(null, null, null, null, null, null)"
+        },
+        {   
+            [{affected_rows,1}],
+            ["insert into ERL_DRV_widetable_null_tests"
+                    "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
+                "VALUES('", LongAsciiString, "', '", LongAsciiString, "', '", LongAsciiString, ",', '", LongAsciiString, "', '", LongAsciiString, "', '", LongAsciiString, "')"]
+        },
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_widetable_null_tests"
+                    "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
+                "VALUES('', '', '', '', '', '')"
+        },
+        {   
+            [{affected_rows,1}],
+            ["insert into ERL_DRV_widetable_not_null_tests"
+                    "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
+                "VALUES('", LongAsciiString, "', '", LongAsciiString, "', '", LongAsciiString, ",', '", LongAsciiString, "', '", LongAsciiString, "', '", LongAsciiString, "')"]
+        },
+        {   
+            [{affected_rows,1}],
+            "insert into ERL_DRV_widetable_not_null_tests"
+                    "(CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY) "
+                "VALUES('', '', '', '', '', '')"
+        }
+    ],
+    _ = [{ResultSets, Query} = begin
+            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {RS, Query}
+        end || {ResultSets, Query} <- Tests],
+    {ok, _State2} = jamdb_sybase:close(State),
+    ok.
+
+select_widetable(_Config) ->
+    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    LongAsciiString = << <<"a">> || _ <- lists:seq(1,1000)>>,
+    LongEmptyString = << <<" ">> || _ <- lists:seq(1,1000)>>,
+    NLongAsciiString = <<LongAsciiString/binary, LongEmptyString/binary, LongEmptyString/binary>>,
+    NEmptyString = << <<" ">> || _ <- lists:seq(1,3000)>>,
+    LongEmptyBinary = <<" ", << <<0>> || _ <- lists:seq(1,999)>>/binary>>,
+    Tests = [
+        {   
+            [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>], [],
+                [
+                    [undefined, undefined, undefined, undefined, undefined, undefined],
+                    [LongAsciiString, LongAsciiString, LongAsciiString, LongAsciiString, LongAsciiString, LongAsciiString],
+                    [LongEmptyString, <<" ">>, <<" ">>, <<" ">>, <<" ">>, <<" ">>]
+                ]}],
+            "select CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY "
+                "from ERL_DRV_widetable_null_tests"
+        },
+        {   
+            [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>], [],
+                [
+                    [LongAsciiString, NLongAsciiString, LongAsciiString, LongAsciiString, LongAsciiString, LongAsciiString],
+                    [LongEmptyString, NEmptyString, <<" ">>, <<" ">>, LongEmptyBinary, <<" ">>]
+                ]}],
+            "select CHAR, NCHAR, VARCHAR, NVARCHAR, BINARY, VARBINARY "
+                "from ERL_DRV_widetable_not_null_tests"
         }
     ],
     _ = [{ResultSets, Query} = begin

@@ -8,48 +8,53 @@
 -include("jamdb_sybase.hrl").
 
 %% decode_data_format
--define(IS_FIXED_LENGTH_TYPE(TDSType),
-    TDSType =:= ?TDS_TYPE_INT1; 
-    TDSType =:= ?TDS_TYPE_INT2; 
-    TDSType =:= ?TDS_TYPE_INT4; 
-    TDSType =:= ?TDS_TYPE_INT8;
-    TDSType =:= ?TDS_TYPE_UINT2; 
-    TDSType =:= ?TDS_TYPE_UINT4; 
-    TDSType =:= ?TDS_TYPE_UINT8;
-    TDSType =:= ?TDS_TYPE_FLT4;
-    TDSType =:= ?TDS_TYPE_FLT8;
-    TDSType =:= ?TDS_TYPE_SHORTDATE;
-    TDSType =:= ?TDS_TYPE_DATETIME;
-    TDSType =:= ?TDS_TYPE_DATE;
-    TDSType =:= ?TDS_TYPE_TIME;
-    TDSType =:= ?TDS_TYPE_BIT;
-    TDSType =:= ?TDS_TYPE_SHORTMONEY;
-    TDSType =:= ?TDS_TYPE_MONEY;
-    TDSType =:= ?TDS_TYPE_VOID
+-define(IS_FIXED_LENGTH_TYPE(DataType),
+    DataType =:= ?TDS_TYPE_INT1; 
+    DataType =:= ?TDS_TYPE_INT2; 
+    DataType =:= ?TDS_TYPE_INT4; 
+    DataType =:= ?TDS_TYPE_INT8;
+    DataType =:= ?TDS_TYPE_UINT2; 
+    DataType =:= ?TDS_TYPE_UINT4; 
+    DataType =:= ?TDS_TYPE_UINT8;
+    DataType =:= ?TDS_TYPE_FLT4;
+    DataType =:= ?TDS_TYPE_FLT8;
+    DataType =:= ?TDS_TYPE_SHORTDATE;
+    DataType =:= ?TDS_TYPE_DATETIME;
+    DataType =:= ?TDS_TYPE_DATE;
+    DataType =:= ?TDS_TYPE_TIME;
+    DataType =:= ?TDS_TYPE_BIT;
+    DataType =:= ?TDS_TYPE_SHORTMONEY;
+    DataType =:= ?TDS_TYPE_MONEY;
+    DataType =:= ?TDS_TYPE_VOID
 ).
 
--define(IS_VARIABLE_LENGTH_TYPE(TDSType),
-    TDSType =:= ?TDS_TYPE_INTN;
-    TDSType =:= ?TDS_TYPE_UINTN;
-    TDSType =:= ?TDS_TYPE_FLTN;
-    TDSType =:= ?TDS_TYPE_CHAR;
-    TDSType =:= ?TDS_TYPE_VARCHAR;
-    TDSType =:= ?TDS_TYPE_BINARY;
-    TDSType =:= ?TDS_TYPE_VARBINARY;
-    TDSType =:= ?TDS_TYPE_DATETIMEN;
-    TDSType =:= ?TDS_TYPE_DATEN;
-    TDSType =:= ?TDS_TYPE_TIMEN;
-    TDSType =:= ?TDS_TYPE_MONEYN
+-define(IS_VARIABLE_LENGTH_TYPE(DataType),
+    DataType =:= ?TDS_TYPE_INTN;
+    DataType =:= ?TDS_TYPE_UINTN;
+    DataType =:= ?TDS_TYPE_FLTN;
+    DataType =:= ?TDS_TYPE_CHAR;
+    DataType =:= ?TDS_TYPE_VARCHAR;
+    DataType =:= ?TDS_TYPE_BINARY;
+    DataType =:= ?TDS_TYPE_VARBINARY;
+    DataType =:= ?TDS_TYPE_DATETIMEN;
+    DataType =:= ?TDS_TYPE_DATEN;
+    DataType =:= ?TDS_TYPE_TIMEN;
+    DataType =:= ?TDS_TYPE_MONEYN
 ).
 
--define(IS_DECIMAL_TYPE(TDSType),
-    TDSType =:= ?TDS_TYPE_NUMN;
-    TDSType =:= ?TDS_TYPE_DECN
+-define(IS_LONG_LENGTH_TYPE(DataType),
+    DataType =:= ?TDS_TYPE_LONGCHAR;
+    DataType =:= ?TDS_TYPE_LONGBINARY
 ).
 
--define(IS_BLOB_TYPE(TDSType), 
-    TDSType =:= ?TDS_TYPE_TEXT;
-    TDSType =:= ?TDS_TYPE_IMAGE
+-define(IS_DECIMAL_TYPE(DataType),
+    DataType =:= ?TDS_TYPE_NUMN;
+    DataType =:= ?TDS_TYPE_DECN
+).
+
+-define(IS_BLOB_TYPE(DataType), 
+    DataType =:= ?TDS_TYPE_TEXT;
+    DataType =:= ?TDS_TYPE_IMAGE
 ).
 
 %% decode_value
@@ -120,10 +125,12 @@ decode_token(<<Token, Data/binary>>, TokensBufer) ->
         ?TDS_TOKEN_PARAMS ->
             {paramsformat, Format} = lists:keyfind(paramsformat,1, TokensBufer),
             decode_params_token(Data, Format);
-        ?TDS_TOKEN_ROWFMT ->        decode_format_token(rowformat, Data);
-        ?TDS_TOKEN_PARAMFMT ->      decode_format_token(paramsformat, Data);
-        ?TDS_TOKEN_ORDERBY ->       decode_orderby_token(1, Data);
-        ?TDS_TOKEN_ORDERBY2 ->      decode_orderby_token(2, Data);
+        ?TDS_TOKEN_ROWFMT ->        decode_rowformat_token(Data);
+        ?TDS_TOKEN_ROWFMT2 ->       decode_rowformat2_token(Data);
+        ?TDS_TOKEN_PARAMFMT ->      decode_paramsformat_token(Data);
+        ?TDS_TOKEN_PARAMFMT2 ->     decode_paramsformat2_token(Data);
+        ?TDS_TOKEN_ORDERBY ->       decode_orderby_token(Data);
+        ?TDS_TOKEN_ORDERBY2 ->      decode_orderby2_token(Data);
         ?TDS_TOKEN_DONE ->          decode_done_token(Data);
         ?TDS_TOKEN_DONEINPROC ->    decode_done_token(Data);
         ?TDS_TOKEN_DONEPROC ->      decode_done_token(Data);
@@ -134,10 +141,15 @@ decode_token(<<Token, Data/binary>>, TokensBufer) ->
         ?TDS_TOKEN_CONTROL ->       decode_control_token(Data);
         ?TDS_TOKEN_RETURNVALUE ->   decode_returnvalue_token(Data);
         ?TDS_TOKEN_RETURNSTATUS ->  decode_returnstatus_token(Data);
+        %?TDS_TOKEN_DYNAMIC ->       decode_dynamic_token(Data);
         _ ->
             %io:format("Unknown Token: ~p Data: ~p~n", [Token, Data]),
             {error, unknown_token, Token}
     end.
+
+%decode_dynamic_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
+%    io:format("DynamicToken: ~p~n", [TokenData]),
+%    {{dynamic, TokenData}, Rest}.
 
 %% internal
 decode_loginack_token(<<_Len:16, Status, TdsVersion:4/binary, SrvNameLen, 
@@ -212,10 +224,11 @@ decode_done_token(<<Status:2/binary, TransState:16, AffectedRows:32, Rest/binary
 %    <<_:FlagsCount, CurrentBit:1, RestBits/bits>> = StatusBits,
 %    decode_status(RestFlags, RestBits, FlagsCount+1, [{CurrentFlag, CurrentBit}|Acc]).
 
-decode_orderby_token(1, <<Columns:16, Rest/binary>>) ->
+decode_orderby_token(<<Columns:16, Rest/binary>>) ->
     {Order, Rest2} = decode_orderby_sequence(Rest, 8, Columns, []),
-    {{orderby, Order}, Rest2};
-decode_orderby_token(2, <<_Len:32, Columns:16, Rest/binary>>) ->
+    {{orderby, Order}, Rest2}.
+
+decode_orderby2_token(<<_Len:32, Columns:16, Rest/binary>>) ->
     {Order, Rest2} = decode_orderby_sequence(Rest, 16, Columns, []),
     {{orderby, Order}, Rest2}.
 
@@ -229,14 +242,29 @@ decode_returnstatus_token(<<Status:32/signed, Rest/binary>>) ->
     {{returnstatus, Status}, Rest}.
 
 decode_returnvalue_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
-    {Format, RestData} = decode_data_format(TokenData),
+    {Format, RestData} = decode_data_format(TokenData, returnvalue),
     {Value, <<>>}  = decode_data(Format, RestData),
     {{returnvalue, Value}, Rest}.
 
-decode_format_token(TokenType, <<Len:16, TokenData:Len/binary, Rest/binary>>) ->
+decode_rowformat_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     <<_ColsNumber:16, TokenRest/binary>> = TokenData,
-    RowFormat = decode_data_format(TokenRest, []),
-    {{TokenType, RowFormat}, Rest}.
+    RowFormat = decode_data_format(TokenRest, simple, []),
+    {{rowformat, RowFormat}, Rest}.
+
+decode_rowformat2_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
+    <<_ColsNumber:16, TokenRest/binary>> = TokenData,
+    RowFormat = decode_data_format(TokenRest, column_extended, []),
+    {{rowformat, RowFormat}, Rest}.
+    
+decode_paramsformat_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
+    <<_ColsNumber:16, TokenRest/binary>> = TokenData,
+    RowFormat = decode_data_format(TokenRest, simple, []),
+    {{paramsformat, RowFormat}, Rest}.
+
+decode_paramsformat2_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
+    <<_ColsNumber:16, TokenRest/binary>> = TokenData,
+    RowFormat = decode_data_format(TokenRest, param_extended, []),
+    {{paramsformat, RowFormat}, Rest}.
 
 decode_row_token(TokenData, RowFormat) ->
     {Rows, Rest} = decode_row(TokenData, RowFormat),
@@ -246,55 +274,100 @@ decode_params_token(TokenData, ParamsFormat) ->
     {Rows, Rest} = decode_row(TokenData, ParamsFormat),
     {{params, Rows}, Rest}.
 
-%% TODO status byte
-decode_data_format(<<>>, RowFormat) ->
+decode_data_format(<<>>, _EncodingFormat, RowFormat) ->
     lists:reverse(RowFormat);
-decode_data_format(Data, RowFormat) ->
-    {ValueFormat, Rest} = decode_data_format(Data),
-    <<LocaleLength, Locale:LocaleLength/binary, Rest2/binary>> = Rest,
-    ValueFormat2 = ValueFormat#format{locale = Locale},
-    decode_data_format(Rest2, [ValueFormat2|RowFormat]).
+decode_data_format(Data, EncodingFormat, RowFormat) ->
+    {ColFormat, Rest} = decode_data_format(Data, EncodingFormat),
+    decode_data_format(Rest, EncodingFormat, [ColFormat|RowFormat]).
 
-decode_data_format(<<LNLen, LabelName:LNLen/binary,
-            Status, UserType:32/signed, TdsType, Rest/binary>>) ->
+%% TODO status byte
+decode_data_format(Data, returnvalue) ->
+    <<ParamNameLen, ParamName:ParamNameLen/binary,
+        Status, UserType:32/signed, Rest/binary>> = Data,
+    {F1, Rest2} = decode_datatype_format(Rest),
+    F2 = F1#format{
+        column_name = ParamName,
+        status      = Status,
+        usertype    = UserType
+    },
+    {F2, Rest2};
+decode_data_format(Data, simple) ->
+    <<ParamNameLen, ParamName:ParamNameLen/binary,
+        Status, UserType:32/signed, Rest/binary>> = Data,
+    {F1, Rest2} = decode_datatype_format(Rest),
+    <<LocaleLength, LocaleInfo:LocaleLength/binary, Rest3/binary>> = Rest2,
+    F2 = F1#format{
+        column_name = ParamName,
+        status      = Status,
+        usertype    = UserType,
+        locale      = LocaleInfo
+    },
+    {F2, Rest3};
+decode_data_format(Data, param_extended) ->
+    <<ParamNameLen, ParamName:ParamNameLen/binary,
+        Status:32, UserType:32/signed, Rest/binary>> = Data,
+    {F1, Rest2} = decode_datatype_format(Rest),
+    <<LocaleLength, LocaleInfo:LocaleLength/binary, Rest3/binary>> = Rest2,
+    F2 = F1#format{
+        column_name = ParamName,
+        status      = Status,
+        usertype    = UserType,
+        locale      = LocaleInfo
+    },
+    {F2, Rest3};
+decode_data_format(Data, column_extended) ->
+    <<LabelNameLen, LabelName:LabelNameLen/binary,
+        CatalogNameLen, CatalogName:CatalogNameLen/binary,
+        SchemaNameLen, SchemaName:SchemaNameLen/binary,
+        TableNameLen, TableName:TableNameLen/binary,
+        ColumnNameLen, ColumnName:ColumnNameLen/binary,
+        Status:32, UserType:32/signed, Rest/binary>> = Data,
+    {F1, Rest2} = decode_datatype_format(Rest),
+    <<LocaleLength, LocaleInfo:LocaleLength/binary, Rest3/binary>> = Rest2,
+    F2 = F1#format{
+        label_name  = LabelName,
+        db_name     = CatalogName,
+        owner_name  = SchemaName,
+        table_name  = TableName,
+        column_name = ColumnName,
+        status      = Status,
+        usertype    = UserType,
+        locale      = LocaleInfo
+    },
+    {F2, Rest3}.
+
+decode_datatype_format(<<DataType, Rest/binary>>) ->
     if
-        ?IS_FIXED_LENGTH_TYPE(TdsType) ->
+        ?IS_FIXED_LENGTH_TYPE(DataType) ->
             Format = #format{
                 format      = fixed,
-                label_name  = LabelName,
-                status      = Status,
-                usertype    = UserType, 
-                tdstype     = TdsType},
+                tdstype     = DataType},
             {Format, Rest};
-        ?IS_VARIABLE_LENGTH_TYPE(TdsType) ->
+        ?IS_VARIABLE_LENGTH_TYPE(DataType) ->
             <<_DataLen, Rest2/binary>> = Rest,
             Format = #format{
                 format      = variable,
-                label_name  = LabelName,
-                status      = Status,
-                usertype    = UserType, 
-                tdstype     = TdsType},
+                tdstype     = DataType},
             {Format, Rest2};
-        ?IS_DECIMAL_TYPE(TdsType) ->
+        ?IS_LONG_LENGTH_TYPE(DataType) ->
+            <<_DataLen:32, Rest2/binary>> = Rest,
+            Format = #format{
+                format      = long,
+                tdstype     = DataType},
+            {Format, Rest2};
+        ?IS_DECIMAL_TYPE(DataType) ->
             <<_DataLen, _Precision, Scale, Rest2/binary>> = Rest,
             Format = #format{
                 format      = decimal,
-                label_name  = LabelName,
-                status      = Status,
-                usertype    = UserType,
-                tdstype     = TdsType,
+                tdstype     = DataType,
                 scale       = Scale},
             {Format, Rest2};
-        TdsType =:= ?TDS_TYPE_TEXT ->
-            io:format("TdsType: ~p, ~p~n", [TdsType, Rest]),
-            <<_DataLen:32, ONLen:16, ObjName:ONLen/binary, Rest2/binary>> = Rest,
+        DataType =:= ?TDS_TYPE_TEXT ->
+            <<_DataLen:32, NLen:16, ObjName:NLen/binary, Rest2/binary>> = Rest,
             Format = #format{
                 format      = text,
-                label_name  = LabelName,
                 obj_name    = ObjName,
-                status      = Status,
-                usertype    = UserType,
-                tdstype     = TdsType},
+                tdstype     = DataType},
             {Format, Rest2}
     end.
 
@@ -328,6 +401,10 @@ decode_data(Data, #format{format=fixed, tdstype=TdsType, usertype=UserType}) ->
     {Value, Rest};
 decode_data(Data, #format{format=variable, usertype=UserType}) ->
     <<Length, BinValue:Length/binary, Rest/binary>> = Data,
+    Value = decode_value(BinValue, UserType),
+    {Value, Rest};
+decode_data(Data, #format{format=long, usertype=UserType}) ->
+    <<Length:32, BinValue:Length/binary, Rest/binary>> = Data,
     Value = decode_value(BinValue, UserType),
     {Value, Rest};
 decode_data(Data, #format{format=decimal, usertype=UserType, scale=Scale}) ->

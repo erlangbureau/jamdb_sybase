@@ -3,8 +3,8 @@
 %% API
 -export([connect/1, connect/5, connect/6, close/1]).
 -export([sql_query/2]).
--export([prepare/3, unprepare/2]).
--export([execute/3]).
+%-export([prepare/3, unprepare/2]).
+%-export([execute/3]).
 
 -include("TDS_5_0.hrl").
 -include("jamdb_sybase.hrl").
@@ -106,16 +106,18 @@ sql_query(State = #sybclient{conn_state = connected}, Query) ->
     {ok, State2} = send_query_req(State, Query),
     handle_resp(State2).
 
-prepare(State, Stmt, Query) ->
-    {ok, State2} = send_prepare_req(State, Stmt, Query),
-    {ok, State2}.
+%prepare(State, Stmt, Query) ->
+%    {ok, State2} = send_prepare_req(State, Stmt, Query),
+%    handle_resp(State2).
+%    {ok, State2}.
 
-unprepare(State, _Stmt) ->
-    {ok, State}.
+%unprepare(State, _Stmt) ->
+%    {ok, State}.
 
-execute(State, Stmt, Args) ->
-    {ok, State2} = send_execute_req(State, Stmt, Args),
-    {ok, State2}.
+%execute(State, Stmt, Args) ->
+%    {ok, State2} = send_execute_req(State, Stmt, Args),
+%    handle_resp(State2).
+%    {ok, State2}.
 
 %% internal
 send_auth_req(#sybclient{env=Env} = State) ->
@@ -127,14 +129,15 @@ send_query_req(State, Query) ->
     Data = ?ENCODER:encode_token_language(BinaryQuery),
     send(State, ?TDS_PKT_QUERY, Data).
 
-send_prepare_req(State, StmtId, Query) ->
-    BQuery = unicode:characters_to_binary(Query),   %% TODO charset
-    Data = ?ENCODER:encode_token_dynamic(?TDS_DYN_PREPARE, [], StmtId, BQuery),
-    send(State, ?TDS_PKT_QUERY, Data).
+%send_prepare_req(State, StmtId, Query) ->
+%    BQuery = unicode:characters_to_binary(Query),   %% TODO charset
+%    BStmtId = unicode:characters_to_binary(StmtId), %% TODO charset
+%    Data = ?ENCODER:encode_token_dynamic(?TDS_DYN_PREPARE, [], BStmtId, BQuery),
+%    send(State, ?TDS_PKT_QUERY, Data).
 
-send_execute_req(State, StmtId, _Args) ->
-    Data = ?ENCODER:encode_token_dynamic(?TDS_DYN_EXEC, [], StmtId, <<"">>),
-    send(State, ?TDS_PKT_QUERY, Data).
+%send_execute_req(State, StmtId, _Args) ->
+%    Data = ?ENCODER:encode_token_dynamic(?TDS_DYN_EXEC, [], StmtId, <<"">>),
+%    send(State, ?TDS_PKT_QUERY, Data).
 
 handle_empty_resp(State) ->
     case handle_resp(State) of
@@ -232,7 +235,7 @@ get_result([error|_RestFlags], _AffectedRows, TokensBufer, _ResultSets) ->
 take_result_set(TokensBufer, AffectedRows) ->
     case take_token(rowformat, TokensBufer) of
         {{rowformat, RowFormat}, TokensBufer2} ->
-            FieldNames = [Fmt#format.label_name || Fmt <- RowFormat],
+            FieldNames = [Fmt#format.column_name || Fmt <- RowFormat],
             {MetaInfo, TokensBufer3} = take_metainfo(TokensBufer2),
             {TokensList, TokensBufer4} = take_tokens(row, TokensBufer3, AffectedRows),
             Rows = [Row || {row, Row} <- TokensList],

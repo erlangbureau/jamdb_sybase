@@ -253,8 +253,8 @@ encode_token_capability() ->
         0:1,    %% 70:Support for BLOB subtype 0x05 (unichar) with serialization type 2
         0:1,    %% 69:Support for BLOB subtype 0x05 (unichar) with serialization type 1
         0:1,    %% 68:Support for BLOB subtype 0x05 (unichar) with serialization type 0
-        0:1,    %% 67:Support for IMAGE data containing UTF-16 encoded data (usertype 36)
-        0:1,    %% 66:Support for LONGBINARY data containing UTF-16 encoded data (usertypes 34 and 35)
+        1:1,    %% 67:Support for IMAGE data containing UTF-16 encoded data (usertype 36)
+        1:1,    %% 66:Support for LONGBINARY data containing UTF-16 encoded data (usertypes 34 and 35)
         0:1,    %% 65:Support for TDS_CUR_DOPT_IMPLICIT cursor declare option
         1:1,    %% 64:Support for NULL unsigned integers
     
@@ -262,7 +262,7 @@ encode_token_capability() ->
         1:1,    %% 62:Support for unsigned 4-byte integers
         1:1,    %% 61:Support for unsigned 2-byte integers
         0:1,    %% 60:Reserved
-        0:1,    %% 59:The client may send requests using the CURDECLARE2, 
+        1:1,    %% 59:The client may send requests using the CURDECLARE2, 
                 %%      DYNAMIC2, PARAMFMT2 tokens (CAP_WIDETABLE)
         0:1,    %% 58:Indicates that a one-byte status field can follow any length or data (etc.)
                 %%      for every column within a row using TDS_ROW or TDS_PARAMS. 
@@ -358,7 +358,7 @@ encode_token_capability() ->
                 %%      if the appropriate status bit is set in CAP_DYNAMIC
         0:1,    %% 61:Client does not need additional metadata in TDS_ROWFMT2
                 %%      Also, server should use TDS_CAP_ROWFMT instead of TDS_ROWFMT2
-        0:1,    %% 60:Client support for non-integer return values from TDS_RETURNVALUE
+        1:1,    %% 60:Client support for non-integer return values from TDS_RETURNVALUE
         1:1,    %% 59:No Support for XML datatype
         0:1,    %% 58:No Support for Server specified packet size larger than the client requested
                 %%      If the CS_REQ_PKTSIZE capability is set, the server may still specify 
