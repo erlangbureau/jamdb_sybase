@@ -13,11 +13,11 @@
 -define(DECODER, jamdb_sybase_tds_decoder).
 
 -record(sybclient, {
-	socket = undefined,
+    socket = undefined,
     conn_state = disconnected :: disconnected | connected | auth_negotiate,
-	tokens_buffer = [],
+    tokens_buffer = [],
     resultsets = [],
-	recv_timeout = 5000 :: timeout(),
+    recv_timeout = 5000 :: timeout(),
     tds_ver,
     server = {<<"Unknown">>, <<0,0,0,0>>},
     req_capabilities = [],
@@ -235,7 +235,7 @@ get_result([error|_RestFlags], _AffectedRows, TokensBufer, _ResultSets) ->
 take_result_set(TokensBufer, AffectedRows) ->
     case take_token(rowformat, TokensBufer) of
         {{rowformat, RowFormat}, TokensBufer2} ->
-            FieldNames = [Fmt#format.column_name || Fmt <- RowFormat],
+            FieldNames = [get_field_name(Fmt) || Fmt <- RowFormat],
             {MetaInfo, TokensBufer3} = take_metainfo(TokensBufer2),
             {TokensList, TokensBufer4} = take_tokens(row, TokensBufer3, AffectedRows),
             Rows = [Row || {row, Row} <- TokensList],
@@ -243,6 +243,11 @@ take_result_set(TokensBufer, AffectedRows) ->
         false ->
             {undefined, TokensBufer}
     end.
+
+get_field_name(#format{label_name = <<>>, column_name = ColumnName}) ->
+    ColumnName;
+get_field_name(#format{label_name = LabelName}) ->
+    LabelName.
 
 take_metainfo(TokensBufer) ->
     case take_token(orderby, TokensBufer) of
