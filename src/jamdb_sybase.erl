@@ -15,8 +15,6 @@
 -record(sybclient, {
     socket = undefined,
     conn_state = disconnected :: disconnected | connected | auth_negotiate,
-    tokens_buffer = [],
-    resultsets = [],
     recv_timeout = 5000 :: timeout(),
     tds_ver,
     server = {<<"Unknown">>, <<0,0,0,0>>},
@@ -51,7 +49,7 @@
         {lib_name, string()} |
         {language, string()} |
         {charset, string()} |
-        {packet_size, string()}.
+        {packet_size, integer()}.
 
 -export_type([state/0]).
 
@@ -101,7 +99,7 @@ close(State = #sybclient{conn_state = connected, socket=Socket}) ->
     ok = gen_tcp:close(Socket),
     {ok, State3#sybclient{socket=undefined, conn_state = disconnected}}.
 
--spec sql_query(string(), state()) -> query_reult().
+-spec sql_query(state(), string()) -> query_reult().
 sql_query(State = #sybclient{conn_state = connected}, Query) ->
     {ok, State2} = send_query_req(State, Query),
     handle_resp(State2).
@@ -258,16 +256,13 @@ take_metainfo(TokensBufer) ->
     end.
 
 take_procedure_status(TokensBufer) ->
-    case take_token(returnstatus, TokensBufer) of
-        {{returnstatus, Value}, TokensBufer2} ->
-            {Value, TokensBufer2};
-        false ->
-            {undefined, TokensBufer}
-    end.
+    take_token_value(returnstatus, TokensBufer, undefined).
 
 take_outparams(TokensBufer) ->
-    {Result, TokensBufer2} = take_all_tokens(returnvalue, TokensBufer),
-    {[Value || {returnvalue, Value} <- Result], TokensBufer2}.
+    %% TODO returnvalue if simple table and params if widetable
+    %{Result, TokensBufer2} = take_tokens(returnvalue, TokensBufer, all),
+    %{[Value || {returnvalue, Value} <- Result], TokensBufer2}.
+    take_token_value(params, TokensBufer, []).
 
 drop_inproc_updates(ResultSets) ->
     drop_inproc_updates(ResultSets, []).
@@ -296,17 +291,6 @@ set_env(Key, NewValue, #sybclient{env=Env1} = State) ->
 get_env(Key, #sybclient{env = Env}, Default) ->
     proplists:get_value(Key, Env, Default).
 
-take_all_tokens(TokenName, TokensBufer) ->
-    take_all_tokens(TokenName, TokensBufer, []).
-
-take_all_tokens(TokenName, TokensBufer, Result) ->
-    case take_token(TokenName, TokensBufer) of
-        {TokenTuple, TokensBufer2} ->
-            take_all_tokens(TokenName, TokensBufer2, [TokenTuple|Result]);
-        false ->
-            {Result, TokensBufer}
-    end.
-
 take_tokens(TokenName, TokensBufer, Count) ->
     take_tokens(TokenName, TokensBufer, Count, []).
 
@@ -315,7 +299,7 @@ take_tokens(TokenName, TokensBufer, Count, Result) when Count > 0 ->
         {TokenTuple, TokensBufer2} ->
             take_tokens(TokenName, TokensBufer2, Count-1, [TokenTuple|Result]);
         false ->
-            {Result, TokensBufer}
+            {lists:reverse(Result), TokensBufer}
     end;
 take_tokens(_TokenName, TokensBufer, _Count, Result) ->
     {lists:reverse(Result), TokensBufer}.
@@ -325,6 +309,14 @@ take_token(TokenName, TokensBufer) ->
         {value, TokenTuple, TokensBufer2} ->
             {TokenTuple, TokensBufer2};
         false -> false
+    end.
+
+take_token_value(Name, TokensBufer, Default) ->
+    case take_token(Name, TokensBufer) of
+        {{Name, Value}, TokensBufer2} ->
+            {Value, TokensBufer2};
+        false ->
+            {Default, TokensBufer}
     end.
 
 send(State, PacketType, Data) ->

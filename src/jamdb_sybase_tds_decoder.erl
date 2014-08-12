@@ -243,7 +243,7 @@ decode_returnstatus_token(<<Status:32/signed, Rest/binary>>) ->
 
 decode_returnvalue_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     {Format, RestData} = decode_data_format(TokenData, returnvalue),
-    {Value, <<>>}  = decode_data(Format, RestData),
+    {Value, <<>>} = decode_data(RestData, Format),
     {{returnvalue, Value}, Rest}.
 
 decode_rowformat_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
@@ -256,12 +256,12 @@ decode_rowformat2_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
     RowFormat = decode_data_format(TokenRest, column_extended, []),
     {{rowformat, RowFormat}, Rest}.
     
-decode_paramsformat_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
+decode_paramsformat_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     <<_ColsNumber:16, TokenRest/binary>> = TokenData,
     RowFormat = decode_data_format(TokenRest, simple, []),
     {{paramsformat, RowFormat}, Rest}.
 
-decode_paramsformat2_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
+decode_paramsformat2_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
     <<_ColsNumber:16, TokenRest/binary>> = TokenData,
     RowFormat = decode_data_format(TokenRest, param_extended, []),
     {{paramsformat, RowFormat}, Rest}.

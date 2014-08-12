@@ -709,6 +709,31 @@ creaate_procedure(_Config) ->
                     "select 'c' "
                     "return 22 "
                 "end"
+        },
+        {   
+            [{affected_rows,0}],
+            "create procedure erl_drv_ok_outparams_procedure( "
+                    "@i1 int, "
+                    "@o1 int output, "
+                    "@i2 varchar(5), "
+                    "@o2 varchar(5) output) "
+            "as "
+                "begin "
+                    "select @o1 = @i1, @o2 = @i2 "
+                "end"
+        },
+        {   
+            [{affected_rows,0}],
+            "create procedure erl_drv_err_outparams_procedure( "
+                    "@i1 int, "
+                    "@o1 int output, "
+                    "@i2 varchar(5), "
+                    "@o2 varchar(5) output) "
+            "as "
+                "begin "
+                    "select @o1 = @i1, @o2 = @i2 "
+                    "return 33 "
+                "end"
         }
     ],
     _ = [{ResultSets, Query} = begin
@@ -726,7 +751,7 @@ execute_procedure(_Config) ->
                 {result_set,[<<>>], [], [[1]]},
                 {result_set,[<<>>], [], [[<<"a">>]]},
                 {result_set,[<<>>], [], [[<<"b">>]]},
-                {procedure_result,0,[]}
+                {procedure_result, 0, []}
             ],
             "exec erl_drv_ok_procedure"
         },
@@ -736,9 +761,21 @@ execute_procedure(_Config) ->
                 {result_set,[<<>>], [], [[<<"a">>]]},
                 {result_set,[<<>>], [], [[<<"b">>]]},
                 {result_set,[<<>>], [], [[<<"c">>]]},
-                {procedure_result,22,[]}
+                {procedure_result, 22, []}
             ],
             "exec erl_drv_err_procedure"
+        },
+        {   
+            [
+                {procedure_result, 0, [1,<<"abc">>]}
+            ],
+            "declare @i1 int declare @o1 int declare @i2 varchar(5) declare @o2 varchar(5) select @i1 = 1, @o1 = 2, @i2 = 'abc', @o2 = 'def' exec erl_drv_ok_outparams_procedure @i1, @o1 out, @i2, @o2 out"
+        },
+        {   
+            [
+                {procedure_result, 33, [1,<<"abc">>]}
+            ],
+            "declare @i1 int declare @o1 int declare @i2 varchar(5) declare @o2 varchar(5) select @i1 = 1, @o1 = 2, @i2 = 'abc', @o2 = 'def' exec erl_drv_err_outparams_procedure @i1, @o1 out, @i2, @o2 out"
         }
     ],
     _ = [{ResultSets, Query} = begin
@@ -758,6 +795,14 @@ drop_procedure(_Config) ->
         {   
             [{affected_rows,0}],
             "drop procedure erl_drv_err_procedure"
+        },
+        {   
+            [{affected_rows,0}],
+            "drop procedure erl_drv_ok_outparams_procedure"
+        },
+        {   
+            [{affected_rows,0}],
+            "drop procedure erl_drv_err_outparams_procedure"
         }
     ],
     _ = [{ResultSets, Query} = begin
