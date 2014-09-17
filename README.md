@@ -19,9 +19,9 @@ Getting Started
 
 TDS Protocol References
 -----
-* [TDS 5.0 Functional Specification Version 3.8 - Sybase](http://www.sybase.com/content/1040983/Sybase-tds38-102306.pdf)
-* [TDS Protocol Documentation - FreeTDS](http://www.freetds.org/tds.html)
-* [jTDS Documentation](http://jtds.sourceforge.net/doc.html)
+* [Official TDS 5.0 Specification, version 3.8, January 2006](http://www.sybase.com/content/1040983/Sybase-tds38-102306.pdf)
+* [FreeTDS Documentation (C)](http://www.freetds.org)
+* [jTDS Documentation (Java)](http://jtds.sourceforge.net/doc.html)
 
 Alternatives
 -----
