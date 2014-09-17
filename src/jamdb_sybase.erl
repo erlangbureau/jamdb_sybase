@@ -2,7 +2,7 @@
 
 %% API
 -export([connect/1, connect/5, connect/6, close/1]).
--export([sql_query/2]).
+-export([sql_query/2, sql_query/3]).
 %-export([prepare/3, unprepare/2]).
 %-export([execute/3]).
 
@@ -15,7 +15,8 @@
 -record(sybclient, {
     socket = undefined,
     conn_state = disconnected :: disconnected | connected | auth_negotiate,
-    recv_timeout = 5000 :: timeout(),
+    query_timeout :: timeout(),
+    packet_size :: non_neg_integer(),
     tds_ver,
     server = {<<"Unknown">>, <<0,0,0,0>>},
     req_capabilities = [],
@@ -49,7 +50,8 @@
         {lib_name, string()} |
         {language, string()} |
         {charset, string()} |
-        {packet_size, integer()}.
+        {packet_size, non_neg_integer()} |
+        {query_timeout, non_neg_integer()}.
 
 -export_type([state/0]).
 
@@ -76,9 +78,16 @@ connect(Env) ->
     Host = proplists:get_value(host, Env, ""), 
     Port = proplists:get_value(port, Env, 4100),
     Database = proplists:get_value(database, Env, ""),
+    QueryTimeout = proplists:get_value(query_timeout, Env, 5000),
+    PacketSize = proplists:get_value(packet_size, Env, 512),
     GenTcpOpts = [binary, {active, false}, {packet, raw}], 
     {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts),
-    State = #sybclient{socket=Socket, env=Env},
+    State = #sybclient{
+                socket        = Socket, 
+                query_timeout = QueryTimeout,
+                packet_size   = PacketSize,
+                env           = Env
+    },
     {ok, State2} = send_auth_req(State),
     case handle_empty_resp(State2) of
         {ok, State3 = #sybclient{conn_state = auth_negotiate}} ->
@@ -98,6 +107,10 @@ close(State = #sybclient{conn_state = connected, socket=Socket}) ->
     {ok, State3} = handle_empty_resp(State2),
     ok = gen_tcp:close(Socket),
     {ok, State3#sybclient{socket=undefined, conn_state = disconnected}}.
+
+-spec sql_query(state(), string(), timeout()) -> query_reult().
+sql_query(State = #sybclient{conn_state = connected}, Query, Timeout) ->
+    sql_query(State#sybclient{query_timeout = Timeout}, Query).
 
 -spec sql_query(state(), string()) -> query_reult().
 sql_query(State = #sybclient{conn_state = connected}, Query) ->
@@ -288,9 +301,6 @@ set_env(Key, NewValue, #sybclient{env=Env1} = State) ->
     Env2 = lists:keystore(Key, 1, Env1, {Key, NewValue}),
     State#sybclient{env = Env2}.
 
-get_env(Key, #sybclient{env = Env}, Default) ->
-    proplists:get_value(Key, Env, Default).
-
 take_tokens(TokenName, TokensBufer, Count) ->
     take_tokens(TokenName, TokensBufer, Count, []).
 
@@ -319,17 +329,14 @@ take_token_value(Name, TokensBufer, Default) ->
             {Default, TokensBufer}
     end.
 
-send(State, PacketType, Data) ->
-    PacketSize = get_env(packet_size, State, 512),
-    send(State, PacketType, PacketSize, Data).
-
-send(State, _PacketType, _PacketSize, <<>>) ->
+send(State, _PacketType, <<>>) ->
     {ok, State};
-send(State=#sybclient{socket=Socket}, PacketType, PacketSize, Data) ->
+send(State, PacketType, Data) ->
+    #sybclient{socket=Socket, packet_size=PacketSize} = State,
     {Packet, RestData} = ?ENCODER:encode_packet(PacketType, PacketSize, Data),
     case gen_tcp:send(Socket, Packet) of
         ok ->
-            send(State, PacketType, PacketSize, RestData);
+            send(State, PacketType, RestData);
         {error, ErrorCode} ->
             State2 = State#sybclient{conn_state = disconnected},
             {socket_error, ErrorCode, State2}
@@ -345,7 +352,7 @@ recv(State, Buffer, ResultData) ->
         {ok, 1, PacketBody, <<>>} ->
             {ok, <<ResultData/binary, PacketBody/binary>>, State};
         {error, incomplete_packet} ->
-            #sybclient{socket=Socket, recv_timeout=Timeout} = State,
+            #sybclient{socket=Socket, query_timeout=Timeout} = State,
             case gen_tcp:recv(Socket, 0, Timeout) of
                 {ok, NetworkData} ->
                     recv(State, <<Buffer/bits, NetworkData/bits>>, ResultData);

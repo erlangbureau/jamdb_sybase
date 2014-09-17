@@ -11,7 +11,9 @@ compile:
 clean:
 	@$(REBAR) clean
 
-tests: eunit ct
+.PHONY: test
+
+test: eunit ct
 
 eunit:
 	@$(REBAR) skip_deps=true eunit
