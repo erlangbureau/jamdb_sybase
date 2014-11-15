@@ -1,7 +1,7 @@
 JamDB Sybase
 ===============
 
-JamDB Sybase is a small and fast driver for Sybase ASE writen in Erlang.
+JamDB Sybase is a small and fast Erlang driver for SAP Sybase Adaptive Server Enterprise (ASE).
 
 Goals
 -----
