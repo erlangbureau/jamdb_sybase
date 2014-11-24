@@ -17,11 +17,14 @@
 -export([insert_widetable/1, select_widetable/1]).
 -export([creaate_procedure/1, execute_procedure/1, drop_procedure/1]).
 
--define(Host, "127.0.0.1").
+-define(Host, "jamdb-sybase-dev.erlangbureau.dp.ua").
 -define(Port, 5000).
--define(Login, "test").
--define(Password, "TestTest").
--define(Database, "TEST").
+-define(Login, "jamdbtest").
+-define(Password, "jamdbtest").
+-define(Database, "jamdbtest").
+
+%% For successful tests you server must be deployed with: 
+%% * Column Size Page: 8k or bigger
 
 %% Common Test
 all() ->

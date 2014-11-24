@@ -1,9 +1,6 @@
 REBAR=`which rebar`
 
-all: get-deps compile
-
-get-deps:
-	@$(REBAR) get-deps
+all: compile
 
 compile:
 	@$(REBAR) compile
@@ -13,13 +10,7 @@ clean:
 
 .PHONY: test
 
-test: eunit ct
-
-eunit:
-	@$(REBAR) skip_deps=true eunit
+test: ct
 
 ct:
 	@$(REBAR) skip_deps=true ct
-
-docs:
-	@$(REBAR) doc
