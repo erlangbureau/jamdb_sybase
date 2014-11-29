@@ -1,5 +1,6 @@
 JamDB Sybase [![Build Status](https://travis-ci.org/erlangbureau/jamdb_sybase.svg?branch=master)](https://travis-ci.org/erlangbureau/jamdb_sybase)
 ===============
+[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/erlangbureau/jamdb_sybase?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 JamDB Sybase is a small and fast Erlang driver for SAP Sybase Adaptive Server Enterprise (ASE).
 
