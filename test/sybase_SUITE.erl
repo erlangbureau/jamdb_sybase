@@ -56,7 +56,7 @@ all() ->
 
 %% tests
 create_tables(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {[{affected_rows,0}], 
         "create table ERL_DRV_int_null_tests( "
@@ -174,14 +174,14 @@ create_tables(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 drop_tables(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {[{affected_rows,0}], "drop table ERL_DRV_int_null_tests"},
         {[{affected_rows,0}], "drop table ERL_DRV_int_not_null_tests"},
@@ -199,14 +199,14 @@ drop_tables(_Config) ->
         {[{affected_rows,0}], "drop table ERL_DRV_widetable_not_null_tests"}
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 simple_select(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{result_set,[<<>>,<<>>,<<>>],[],[[1,<<"test">>,undefined]]}],
@@ -218,14 +218,14 @@ simple_select(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 empty_select(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{result_set,[<<"U_BIG">>,<<"S_BIG">>,<<"U_INT">>,
@@ -235,14 +235,14 @@ empty_select(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 insert_integer_types(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{affected_rows,1}],
@@ -268,14 +268,14 @@ insert_integer_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 select_integer_types(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{result_set, [<<"U_BIG">>, <<"S_BIG">>, <<"U_INT">>, <<"S_INT">>, 
@@ -302,14 +302,14 @@ select_integer_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 insert_char_types(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{affected_rows,1}],
@@ -343,14 +343,14 @@ insert_char_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 select_char_types(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>], [],
@@ -373,14 +373,14 @@ select_char_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 insert_widetable(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     LongAsciiString = << <<"a">> || _ <- lists:seq(1,1000)>>,
     Tests = [
         {   
@@ -415,14 +415,14 @@ insert_widetable(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 select_widetable(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     LongAsciiString = << <<"a">> || _ <- lists:seq(1,1000)>>,
     LongEmptyString = << <<" ">> || _ <- lists:seq(1,1000)>>,
     NLongAsciiString = <<LongAsciiString/binary, LongEmptyString/binary, LongEmptyString/binary>>,
@@ -450,14 +450,14 @@ select_widetable(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 insert_text_type(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{affected_rows,1}],
@@ -503,14 +503,14 @@ insert_text_type(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 select_text_type(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{result_set,[<<"TEXT">>], [],
@@ -535,28 +535,28 @@ select_text_type(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 insert_float_types(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {[{affected_rows,1}], "insert into ERL_DRV_float_null_tests(FLOAT, REAL) VALUES(null, null)"},
         {[{affected_rows,1}], "insert into ERL_DRV_float_null_tests(FLOAT, REAL) VALUES(3.14, 3.14)"},
         {[{affected_rows,1}], "insert into ERL_DRV_float_not_null_tests(FLOAT, REAL) VALUES(-3.14, -3.14)"}
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 select_float_types(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{result_set, [<<"FLOAT">>,<<"REAL">>], [], [ 
@@ -573,14 +573,14 @@ select_float_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 %insert_money_types(_Config) ->
-%    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+%    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
 %    Tests = [
 %        {1, "insert into ERL_DRV_money_null_tests(SMALLMONEY, MONEY) "
 %                "VALUES(null, null)"
@@ -593,14 +593,14 @@ select_float_types(_Config) ->
 %        }
 %    ],
 %    _ = [{ResultSets, Query} = begin
-%            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+%            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
 %            {RS, Query}
 %        end || {ResultSets, Query} <- Tests],
-%    {ok, _State2} = jamdb_sybase:close(State),
+%    {ok, _State2} = jamdb_sybase_conn:close(State),
 %    ok.
 %
 %select_money_types(_Config) ->
-%    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+%    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
 %    Tests = [
 %        {   
 %            [{result_set, [<<"SMALLMONEY">>, <<"MONEY">>],
@@ -619,14 +619,14 @@ select_float_types(_Config) ->
 %        }
 %    ],
 %    _ = [{ResultSets, Query} = begin
-%            {result, RS, _} = jamdb_sybase:sql_query(State, Query),
+%            {result, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
 %            {RS, Query}
 %        end || {ResultSets, Query} <- Tests],
-%    {ok, _State2} = jamdb_sybase:close(State),
+%    {ok, _State2} = jamdb_sybase_conn:close(State),
 %    ok.
 
 insert_time_types(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{affected_rows,1}],
@@ -650,14 +650,14 @@ insert_time_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 select_time_types(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{result_set,[<<"DATETIME">>, <<"SMALLDATETIME">>, 
@@ -683,15 +683,15 @@ select_time_types(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 
 creaate_procedure(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{affected_rows,0}],
@@ -740,14 +740,14 @@ creaate_procedure(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 execute_procedure(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [
@@ -782,14 +782,14 @@ execute_procedure(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.
 
 drop_procedure(_Config) ->
-    {ok, State} = jamdb_sybase:connect(?Host, ?Port, ?Login, ?Password, ?Database),
+    {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
             [{affected_rows,0}],
@@ -809,8 +809,8 @@ drop_procedure(_Config) ->
         }
     ],
     _ = [{ResultSets, Query} = begin
-            {ok, RS, _} = jamdb_sybase:sql_query(State, Query),
+            {ok, RS, _} = jamdb_sybase_conn:sql_query(State, Query),
             {RS, Query}
         end || {ResultSets, Query} <- Tests],
-    {ok, _State2} = jamdb_sybase:close(State),
+    {ok, _State2} = jamdb_sybase_conn:close(State),
     ok.

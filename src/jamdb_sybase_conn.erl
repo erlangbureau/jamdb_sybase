@@ -1,4 +1,4 @@
--module(jamdb_sybase).
+-module(jamdb_sybase_conn).
 
 %% API
 -export([connect/1, connect/5, connect/6, close/1]).
