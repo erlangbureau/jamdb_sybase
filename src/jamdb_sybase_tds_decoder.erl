@@ -144,7 +144,7 @@ decode_token(<<Token, Data/binary>>, TokensBufer) ->
         %?TDS_TOKEN_DYNAMIC ->       decode_dynamic_token(Data);
         _ ->
             %io:format("Unknown Token: ~p Data: ~p~n", [Token, Data]),
-            {error, unknown_token, Token}
+            {error, unknown_tds_token}
     end.
 
 %decode_dynamic_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->

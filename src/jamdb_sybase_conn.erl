@@ -25,7 +25,8 @@
 }).
 
 -opaque state() :: #sybclient{}.
--type empty_result() :: {ok, state()} | {error, binary(), state()}.
+-type error_type() :: socket | remote | local.
+-type empty_result() :: {ok, state()} | {error, error_type(), binary(), state()}.
 -type affected_rows() :: {affected_rows, non_neg_integer()}.
 -type columns() :: list().  %% TODO
 -type metainfo() :: list(). %%TODO
@@ -92,7 +93,7 @@ connect(Env) ->
     case handle_empty_resp(State2) of
         {ok, State3 = #sybclient{conn_state = auth_negotiate}} ->
             %%TODO Negotiate
-            {driver_error, <<"Auth Negotiate not implemented">>, State3};
+            {error, local, <<"Auth Negotiate not implemented">>, State3};
         {ok, State3 = #sybclient{conn_state = connected}} ->
             {ok, State4} = send_query_req(State3, ["use ", Database]),
             handle_empty_resp(State4);
@@ -227,7 +228,7 @@ get_result([Flag|RestFlags], AffectedRows, TokensBufer, ResultSets)
 get_result([error|_RestFlags], _AffectedRows, TokensBufer, _ResultSets) ->
     {Message, _} = take_token(message, TokensBufer), 
         %% TODO check that the class > 10
-    {server_error, Message}.
+    {error, remote, Message}.
 
 %format_message(#message{}) ->
 %#message{
@@ -339,7 +340,7 @@ send(State, PacketType, Data) ->
             send(State, PacketType, RestData);
         {error, ErrorCode} ->
             State2 = State#sybclient{conn_state = disconnected},
-            {socket_error, ErrorCode, State2}
+            {error, socket, ErrorCode, State2}
     end.
 
 recv(State) ->
@@ -358,6 +359,6 @@ recv(State, Buffer, ResultData) ->
                     recv(State, <<Buffer/bits, NetworkData/bits>>, ResultData);
                 {error, ErrorCode} ->
                     State2 = State#sybclient{conn_state = disconnected},
-                    {socket_error, ErrorCode, State2}
+                    {error, socket, ErrorCode, State2}
             end
     end.
