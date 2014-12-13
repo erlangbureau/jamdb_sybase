@@ -52,6 +52,7 @@
         {language, string()} |
         {charset, string()} |
         {packet_size, non_neg_integer()} |
+        {connect_timeout, non_neg_integer()} |
         {query_timeout, non_neg_integer()}.
 
 -export_type([state/0]).
@@ -80,9 +81,10 @@ connect(Env) ->
     Port = proplists:get_value(port, Env, 4100),
     Database = proplists:get_value(database, Env, ""),
     QueryTimeout = proplists:get_value(query_timeout, Env, 5000),
+    ConnectTimeout = proplists:get_value(connect_timeout, Env, 5000),
     PacketSize = proplists:get_value(packet_size, Env, 512),
     GenTcpOpts = [binary, {active, false}, {packet, raw}], 
-    {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts),
+    {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts, ConnectTimeout),
     State = #sybclient{
                 socket        = Socket, 
                 query_timeout = QueryTimeout,
