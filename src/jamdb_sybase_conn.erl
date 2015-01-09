@@ -50,7 +50,6 @@
         {app_name, string()} |
         {lib_name, string()} |
         {language, string()} |
-        {charset, string()} |
         {packet_size, non_neg_integer()} |
         {connect_timeout, non_neg_integer()} |
         {query_timeout, non_neg_integer()}.
@@ -139,13 +138,13 @@ send_auth_req(#sybclient{env=Env} = State) ->
     send(State, ?TDS_PKT_LOGIN, Data).
 
 send_query_req(State, Query) ->
-    BinaryQuery = unicode:characters_to_binary(Query),   %% TODO charset
+    BinaryQuery = unicode:characters_to_binary(Query),
     Data = ?ENCODER:encode_token_language(BinaryQuery),
     send(State, ?TDS_PKT_QUERY, Data).
 
 %send_prepare_req(State, StmtId, Query) ->
-%    BQuery = unicode:characters_to_binary(Query),   %% TODO charset
-%    BStmtId = unicode:characters_to_binary(StmtId), %% TODO charset
+%    BQuery = unicode:characters_to_binary(Query),
+%    BStmtId = unicode:characters_to_binary(StmtId),
 %    Data = ?ENCODER:encode_token_dynamic(?TDS_DYN_PREPARE, [], BStmtId, BQuery),
 %    send(State, ?TDS_PKT_QUERY, Data).
 

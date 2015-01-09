@@ -31,7 +31,7 @@ encode_login_record(EnvOpts) ->
     LibName         = proplists:get_value(lib_name, EnvOpts, "spacejam"),
     ServerName      = proplists:get_value(server_name, EnvOpts, ""),
     Language        = proplists:get_value(language, EnvOpts, "us_english"),
-    Charset         = proplists:get_value(charset, EnvOpts, ""),
+    Charset         = proplists:get_value(charset, EnvOpts, utf8),
     PacketSize      = proplists:get_value(packet_size, EnvOpts, 512),
     <<
         (encode_data(UserHost, ?USER_TYPE_CHAR, 30)):31/binary,
@@ -460,10 +460,10 @@ encode_data(Data, ?USER_TYPE_CHAR, MaxLength) when is_binary(Data) ->
             <<Data:MaxLength/binary, MaxLength>>
     end;
 encode_data(Data, UserType, MaxLength) when is_list(Data) ->
-    Binary = unicode:characters_to_binary(Data), %% TODO charset
+    Binary = unicode:characters_to_binary(Data),
     encode_data(Binary, UserType, MaxLength);
 encode_data(Data, UserType, MaxLength) when is_atom(Data) ->
-    Binary = atom_to_binary(Data, unicode), %% TODO charset
+    Binary = atom_to_binary(Data, utf8),
     encode_data(Binary, UserType, MaxLength);
 encode_data(Data, UserType, MaxLength) when is_integer(Data) ->
     List = integer_to_list(Data),
