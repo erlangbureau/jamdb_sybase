@@ -1,7 +1,7 @@
 language: erlang
-script: "make && make test"
+script: "make && make tests"
 otp_release:
-   - 17.3
+   - 17.4
    - R16B03-1
    - R15B03
    - R14B04
