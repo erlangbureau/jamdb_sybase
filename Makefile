@@ -1,16 +1,6 @@
-REBAR=`which rebar`
+PROJECT = jamdb_sybase
 
-all: compile
+include erlang.mk
 
-compile:
-	@$(REBAR) compile
-
-clean:
-	@$(REBAR) clean
-
-.PHONY: test
-
-test: ct
-
-ct:
-	@$(REBAR) skip_deps=true ct
+clean::
+	@rm -rf logs
