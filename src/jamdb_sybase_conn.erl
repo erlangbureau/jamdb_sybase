@@ -1,13 +1,16 @@
 -module(jamdb_sybase_conn).
 
 %% API
--export([connect/1, connect/5, connect/6, close/1]).
+-export([connect/5]).   %% deprecated
+-export([close/1]).     %% deprecated
+-export([connect/1, connect/2, disconnect/1, disconnect/2]).
 -export([sql_query/2, sql_query/3]).
 %-export([prepare/3, unprepare/2]).
 %-export([execute/3]).
 
 -include("TDS_5_0.hrl").
 -include("jamdb_sybase.hrl").
+-include("jamdb_sybase_defaults.hrl").
 
 -define(ENCODER, jamdb_sybase_tds_encoder).
 -define(DECODER, jamdb_sybase_tds_decoder).
@@ -15,7 +18,6 @@
 -record(sybclient, {
     socket = undefined,
     conn_state = disconnected :: disconnected | connected | auth_negotiate,
-    query_timeout :: timeout(),
     packet_size :: non_neg_integer(),
     tds_ver,
     server = {<<"Unknown">>, <<0,0,0,0>>},
@@ -50,74 +52,91 @@
         {app_name, string()} |
         {lib_name, string()} |
         {language, string()} |
-        {packet_size, non_neg_integer()} |
-        {connect_timeout, non_neg_integer()} |
-        {query_timeout, non_neg_integer()}.
+        {packet_size, non_neg_integer()}.
 
 -export_type([state/0]).
 
 %% API
+
+%% Deprecated
 -spec connect(string(), inet:port_number(), string(), string(), string())
     -> empty_result().
 connect(Host, Port, User, Password, Database) ->
-    connect(Host, Port, User, Password, Database, []).
-
--spec connect(string(), inet:port_number(), string(), 
-        string(), string(), [env()]) -> empty_result().
-connect(Host, Port, User, Password, Database, Env) ->
-    Env2 = [
+    Env = [
         {host, Host},
         {port, Port},
         {user, User},
         {password, Password},
         {database, Database}
-    |Env],
-    connect(Env2).
+    ],
+    connect(Env).
+
+-spec connect([env()], timeout()) -> empty_result().
+connect(Opts) ->
+    connect(Opts, ?DEF_TIMEOUT).
 
 -spec connect([env()]) -> empty_result().
-connect(Env) ->
-    Host = proplists:get_value(host, Env, ""), 
-    Port = proplists:get_value(port, Env, 4100),
-    Database = proplists:get_value(database, Env, ""),
-    QueryTimeout = proplists:get_value(query_timeout, Env, 5000),
-    ConnectTimeout = proplists:get_value(connect_timeout, Env, 5000),
-    PacketSize = proplists:get_value(packet_size, Env, 512),
+connect(Opts, Timeout) ->
+    Host = proplists:get_value(host, Opts, ?DEF_HOST), 
+    Port = proplists:get_value(port, Opts, ?DEF_PORT),
+    Database = proplists:get_value(database, Opts, ?DEF_DATABASE),
+    PacketSize = proplists:get_value(packet_size, Opts, ?DEF_PACKET_SIZE),
     GenTcpOpts = [binary, {active, false}, {packet, raw}], 
-    {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts, ConnectTimeout),
+    {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts, Timeout), %% TODO handle timeout
     State = #sybclient{
                 socket        = Socket, 
-                query_timeout = QueryTimeout,
                 packet_size   = PacketSize,
-                env           = Env
+                env           = Opts
     },
     {ok, State2} = send_auth_req(State),
-    case handle_empty_resp(State2) of
+    case handle_empty_resp(State2, Timeout) of
         {ok, State3 = #sybclient{conn_state = auth_negotiate}} ->
             %%TODO Negotiate
             {error, local, <<"Auth Negotiate not implemented">>, State3};
         {ok, State3 = #sybclient{conn_state = connected}} ->
             {ok, State4} = send_query_req(State3, ["use ", Database]),
-            handle_empty_resp(State4);
+            handle_empty_resp(State4, Timeout);
         Error ->
             Error
     end.
 
+%% Deprecated
 -spec close(state()) -> {ok, state()}.
 close(State = #sybclient{conn_state = connected, socket=Socket}) ->
     Data = ?ENCODER:encode_token_logout(),
     {ok, State2} = send(State, ?TDS_PKT_QUERY, Data),
-    {ok, State3} = handle_empty_resp(State2),
+    {ok, State3} = handle_empty_resp(State2, ?DEF_TIMEOUT),
     ok = gen_tcp:close(Socket),
     {ok, State3#sybclient{socket=undefined, conn_state = disconnected}}.
 
--spec sql_query(state(), string(), timeout()) -> query_reult().
-sql_query(State = #sybclient{conn_state = connected}, Query, Timeout) ->
-    sql_query(State#sybclient{query_timeout = Timeout}, Query).
+-spec disconnect(state()) -> {ok, [env()]}.
+disconnect(State) ->
+    disconnect(State, ?DEF_TIMEOUT).
+
+-spec disconnect(state(), timeout()) -> {ok, [env()]}.
+disconnect(#sybclient{conn_state=connected, socket=Socket, env=Env}, 0) ->
+    ok = gen_tcp:close(Socket),
+    {ok, Env};
+disconnect(State = #sybclient{conn_state=connected, socket=Socket, env=Env}, Timeout) ->
+    Data = ?ENCODER:encode_token_logout(),
+    try send(State, ?TDS_PKT_QUERY, Data) of
+        {ok, State2} -> 
+            {ok, _State3} = handle_empty_resp(State2, Timeout)
+    after
+        ok = gen_tcp:close(Socket)
+    end,
+    {ok, Env};
+disconnect(#sybclient{env = Env}, _Timeout) ->
+    {ok, Env}.
 
 -spec sql_query(state(), string()) -> query_reult().
-sql_query(State = #sybclient{conn_state = connected}, Query) ->
+sql_query(State, Query) ->
+    sql_query(State, Query, ?DEF_TIMEOUT).
+
+-spec sql_query(state(), string(), timeout()) -> query_reult().
+sql_query(State = #sybclient{conn_state = connected}, Query, Timeout) ->
     {ok, State2} = send_query_req(State, Query),
-    handle_resp(State2).
+    handle_resp(State2, Timeout).
 
 %prepare(State, Stmt, Query) ->
 %    {ok, State2} = send_prepare_req(State, Stmt, Query),
@@ -152,24 +171,22 @@ send_query_req(State, Query) ->
 %    Data = ?ENCODER:encode_token_dynamic(?TDS_DYN_EXEC, [], StmtId, <<"">>),
 %    send(State, ?TDS_PKT_QUERY, Data).
 
-handle_empty_resp(State) ->
-    case handle_resp(State) of
+handle_empty_resp(State, Timeout) ->
+    case handle_resp(State, Timeout) of
         {ok, _, State2} ->
             {ok, State2};
         Other ->
             Other
     end.
 
-handle_resp(State) ->
-    case recv(State) of
-        {ok, BinaryData, State2} ->
-            handle_resp(BinaryData, State2);
-        Error ->
-            Error
+handle_resp(State = #sybclient{socket=Socket}, Timeout) ->
+    case recv(Socket, Timeout) of
+        {ok, BinaryData} ->
+            handle_resp(BinaryData, [], [], State);
+        {error, ErrorCode} ->
+            State2 = State#sybclient{conn_state = disconnected},
+            {error, socket, ErrorCode, State2}
     end.
-
-handle_resp(Data, State) ->
-    handle_resp(Data, [], [], State).
 
 handle_resp(Data, TokensBufer, ResultSets, State) ->
     case ?DECODER:decode_token(Data, TokensBufer) of
@@ -344,22 +361,22 @@ send(State, PacketType, Data) ->
             {error, socket, ErrorCode, State2}
     end.
 
-recv(State) ->
-    recv(State, <<>>, <<>>).
+recv(Socket, Timeout) ->
+    recv(Socket, Timeout, <<>>, <<>>).
 
-recv(State, Buffer, ResultData) ->
+recv(Socket, Timeout, Buffer, ResultData) ->
     case ?DECODER:decode_packet(Buffer) of
         {ok, 0, PacketBody, Buffer2} ->
-            recv(State, Buffer2, <<ResultData/binary, PacketBody/binary>>);
+            ResultData2 = <<ResultData/binary, PacketBody/binary>>,
+            recv(Socket, Timeout, Buffer2, ResultData2);
         {ok, 1, PacketBody, <<>>} ->
-            {ok, <<ResultData/binary, PacketBody/binary>>, State};
+            {ok, <<ResultData/binary, PacketBody/binary>>};
         {error, incomplete_packet} ->
-            #sybclient{socket=Socket, query_timeout=Timeout} = State,
             case gen_tcp:recv(Socket, 0, Timeout) of
                 {ok, NetworkData} ->
-                    recv(State, <<Buffer/bits, NetworkData/bits>>, ResultData);
+                    NewBuffer = <<Buffer/bits, NetworkData/bits>>,
+                    recv(Socket, Timeout, NewBuffer, ResultData);
                 {error, ErrorCode} ->
-                    State2 = State#sybclient{conn_state = disconnected},
-                    {error, socket, ErrorCode, State2}
+                    {error, socket, ErrorCode}
             end
     end.
