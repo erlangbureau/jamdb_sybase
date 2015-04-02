@@ -1,12 +1,16 @@
 -module(jamdb_sybase_conn).
 
 %% API
--export([connect/5]).   %% deprecated
--export([close/1]).     %% deprecated
--export([connect/1, connect/2, disconnect/1, disconnect/2]).
+-export([connect/1, connect/2]).
+-export([reconnect/1]).
+-export([disconnect/1, disconnect/2]).
 -export([sql_query/2, sql_query/3]).
 %-export([prepare/3, unprepare/2]).
 %-export([execute/3]).
+
+%% deprecated API
+-export([connect/5]).
+-export([close/1]).
 
 -include("TDS_5_0.hrl").
 -include("jamdb_sybase.hrl").
@@ -53,24 +57,12 @@
         {lib_name, string()} |
         {language, string()} |
         {packet_size, non_neg_integer()}.
+-type options() :: [env()].
 
 -export_type([state/0]).
+-export_type([options/0]).
 
 %% API
-
-%% Deprecated
--spec connect(string(), inet:port_number(), string(), string(), string())
-    -> empty_result().
-connect(Host, Port, User, Password, Database) ->
-    Env = [
-        {host, Host},
-        {port, Port},
-        {user, User},
-        {password, Password},
-        {database, Database}
-    ],
-    connect(Env).
-
 -spec connect([env()], timeout()) -> empty_result().
 connect(Opts) ->
     connect(Opts, ?DEF_TIMEOUT).
@@ -100,15 +92,6 @@ connect(Opts, Timeout) ->
             Error
     end.
 
-%% Deprecated
--spec close(state()) -> {ok, state()}.
-close(State = #sybclient{conn_state = connected, socket=Socket}) ->
-    Data = ?ENCODER:encode_token_logout(),
-    {ok, State2} = send(State, ?TDS_PKT_QUERY, Data),
-    {ok, State3} = handle_empty_resp(State2, ?DEF_TIMEOUT),
-    ok = gen_tcp:close(Socket),
-    {ok, State3#sybclient{socket=undefined, conn_state = disconnected}}.
-
 -spec disconnect(state()) -> {ok, [env()]}.
 disconnect(State) ->
     disconnect(State, ?DEF_TIMEOUT).
@@ -128,6 +111,11 @@ disconnect(State = #sybclient{conn_state=connected, socket=Socket, env=Env}, Tim
     {ok, Env};
 disconnect(#sybclient{env = Env}, _Timeout) ->
     {ok, Env}.
+
+-spec reconnect(state()) -> {ok, state()}.
+reconnect(State) ->
+    {ok, InitOpts} = disconnect(State),
+    connect(InitOpts).
 
 -spec sql_query(state(), string()) -> query_reult().
 sql_query(State, Query) ->
@@ -150,6 +138,27 @@ sql_query(State = #sybclient{conn_state = connected}, Query, Timeout) ->
 %    {ok, State2} = send_execute_req(State, Stmt, Args),
 %    handle_resp(State2).
 %    {ok, State2}.
+
+%% Deprecated
+-spec connect(string(), inet:port_number(), string(), string(), string())
+    -> empty_result().
+connect(Host, Port, User, Password, Database) ->
+    Env = [
+        {host, Host},
+        {port, Port},
+        {user, User},
+        {password, Password},
+        {database, Database}
+    ],
+    connect(Env).
+
+-spec close(state()) -> {ok, state()}.
+close(State = #sybclient{conn_state = connected, socket=Socket}) ->
+    Data = ?ENCODER:encode_token_logout(),
+    {ok, State2} = send(State, ?TDS_PKT_QUERY, Data),
+    {ok, State3} = handle_empty_resp(State2, ?DEF_TIMEOUT),
+    ok = gen_tcp:close(Socket),
+    {ok, State3#sybclient{socket=undefined, conn_state = disconnected}}.
 
 %% internal
 send_auth_req(#sybclient{env=Env} = State) ->
