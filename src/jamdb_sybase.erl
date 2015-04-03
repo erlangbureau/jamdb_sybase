@@ -52,6 +52,9 @@ handle_call({sql_query, Query, Timeout}, _From, State) ->
     try jamdb_sybase_conn:sql_query(State, Query, Timeout) of
         {ok, Result, State2} -> 
             {reply, {ok, Result}, State2};
+        {error, socket, Reason, State2} ->
+            {ok, State3} = jamdb_sybase_conn:reconnect(State2),
+            {reply, {error, socket, Reason}, State3};
         {error, Type, Reason, State2} ->
             {reply, {error, Type, Reason}, State2}
     catch

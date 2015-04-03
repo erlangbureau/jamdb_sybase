@@ -74,7 +74,7 @@ connect(Opts, Timeout) ->
     Database = proplists:get_value(database, Opts, ?DEF_DATABASE),
     PacketSize = proplists:get_value(packet_size, Opts, ?DEF_PACKET_SIZE),
     GenTcpOpts = [binary, {active, false}, {packet, raw}], 
-    {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts, Timeout), %% TODO handle timeout
+    {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts, Timeout), %% TODO handle {error,timeout}
     State = #sybclient{
                 socket        = Socket, 
                 packet_size   = PacketSize,
@@ -192,9 +192,10 @@ handle_resp(State = #sybclient{socket=Socket}, Timeout) ->
     case recv(Socket, Timeout) of
         {ok, BinaryData} ->
             handle_resp(BinaryData, [], [], State);
-        {error, ErrorCode} ->
+        {error, _Type, _ErrorCode} = Error ->
+            _ = disconnect(State),
             State2 = State#sybclient{conn_state = disconnected},
-            {error, socket, ErrorCode, State2}
+            erlang:append_element(Error, State2)
     end.
 
 handle_resp(Data, TokensBufer, ResultSets, State) ->
