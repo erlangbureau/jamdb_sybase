@@ -34,18 +34,8 @@ sql_query(Pid, Query, Timeout) ->
 
 %% gen_server callbacks
 init(Opts) ->
-    try
-        jamdb_sybase_conn:connect(Opts)
-    catch
-        _Class:Reason ->
-            %% TODO log
-            Stacktrace = erlang:get_stacktrace(),
-            ErrDesc = [
-                {reason, Reason},
-                {stacktrace, Stacktrace}
-            ],
-            {error, local, {unknown_error, ErrDesc}}
-    end.
+    {ok, State} = jamdb_sybase_conn:connect(Opts),
+    {ok, State}.
 
 %% Error types: socket, remote, local
 handle_call({sql_query, Query, Timeout}, _From, State) ->
@@ -53,13 +43,12 @@ handle_call({sql_query, Query, Timeout}, _From, State) ->
         {ok, Result, State2} -> 
             {reply, {ok, Result}, State2};
         {error, socket, Reason, State2} ->
-            {ok, State3} = jamdb_sybase_conn:reconnect(State2),
+            {ok, State3} = jamdb_sybase_conn:reconnect(State2), %% TODO error
             {reply, {error, socket, Reason}, State3};
         {error, Type, Reason, State2} ->
             {reply, {error, Type, Reason}, State2}
     catch
         _Class:Reason ->
-            %% TODO log
             Stacktrace = erlang:get_stacktrace(),
             ErrDesc = [
                 {reason, Reason},

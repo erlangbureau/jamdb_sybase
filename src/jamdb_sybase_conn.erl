@@ -71,25 +71,18 @@ connect(Opts) ->
 connect(Opts, Timeout) ->
     Host = proplists:get_value(host, Opts, ?DEF_HOST), 
     Port = proplists:get_value(port, Opts, ?DEF_PORT),
-    Database = proplists:get_value(database, Opts, ?DEF_DATABASE),
     PacketSize = proplists:get_value(packet_size, Opts, ?DEF_PACKET_SIZE),
-    GenTcpOpts = [binary, {active, false}, {packet, raw}], 
-    {ok, Socket} = gen_tcp:connect(Host, Port, GenTcpOpts, Timeout), %% TODO handle {error,timeout}
-    State = #sybclient{
+    GenTcpOpts = [binary, {active, false}, {packet, raw}],
+    case gen_tcp:connect(Host, Port, GenTcpOpts, Timeout) of
+        {ok, Socket} ->
+            State = #sybclient{
                 socket        = Socket, 
                 packet_size   = PacketSize,
                 env           = Opts
-    },
-    {ok, State2} = send_auth_req(State),
-    case handle_empty_resp(State2, Timeout) of
-        {ok, State3 = #sybclient{conn_state = auth_negotiate}} ->
-            %%TODO Negotiate
-            {error, local, <<"Auth Negotiate not implemented">>, State3};
-        {ok, State3 = #sybclient{conn_state = connected}} ->
-            {ok, State4} = send_query_req(State3, ["use ", Database]),
-            handle_empty_resp(State4, Timeout);
-        Error ->
-            Error
+            },
+            login(State, Timeout);
+        {error, Reason} ->
+            {error, socket, Reason}
     end.
 
 -spec disconnect(state()) -> {ok, [env()]}.
@@ -104,7 +97,9 @@ disconnect(State = #sybclient{conn_state=connected, socket=Socket, env=Env}, Tim
     Data = ?ENCODER:encode_token_logout(),
     try send(State, ?TDS_PKT_QUERY, Data) of
         {ok, State2} -> 
-            {ok, _State3} = handle_empty_resp(State2, Timeout)
+            _ = handle_empty_resp(State2, Timeout);
+        {error, _Type, _Reason, _State2} ->
+            ok
     after
         ok = gen_tcp:close(Socket)
     end,
@@ -123,7 +118,7 @@ sql_query(State, Query) ->
 
 -spec sql_query(state(), string(), timeout()) -> query_reult().
 sql_query(State = #sybclient{conn_state = connected}, Query, Timeout) ->
-    {ok, State2} = send_query_req(State, Query),
+    {ok, State2} = send_query_req(State, Query),    %% TODO handle error
     handle_resp(State2, Timeout).
 
 %prepare(State, Stmt, Query) ->
@@ -152,6 +147,7 @@ connect(Host, Port, User, Password, Database) ->
     ],
     connect(Env).
 
+%% Deprecated
 -spec close(state()) -> {ok, state()}.
 close(State = #sybclient{conn_state = connected, socket=Socket}) ->
     Data = ?ENCODER:encode_token_logout(),
@@ -161,7 +157,24 @@ close(State = #sybclient{conn_state = connected, socket=Socket}) ->
     {ok, State3#sybclient{socket=undefined, conn_state = disconnected}}.
 
 %% internal
-send_auth_req(#sybclient{env=Env} = State) ->
+login(State, Timeout) ->
+    {ok, State2} = send_login_req(State),   %% TODO handle error
+    case handle_empty_resp(State2, Timeout) of
+        {ok, State3 = #sybclient{conn_state = connected, env=Env}} ->
+            Database = proplists:get_value(database, Env, ?DEF_DATABASE),
+            system_query(State3, ["use ", Database], Timeout);
+        {ok, State3 = #sybclient{conn_state = auth_negotiate}} ->
+            %%TODO Negotiate
+            {error, local, <<"Auth Negotiate not implemented">>, State3};
+        Error ->
+            Error
+    end.
+
+system_query(State = #sybclient{conn_state=connected}, Query, Timeout) ->
+    {ok, State2} = send_query_req(State, Query), %% TODO handle error
+    handle_empty_resp(State2, Timeout).
+
+send_login_req(#sybclient{env=Env} = State) ->
     Data = ?ENCODER:encode_login_record(Env),
     send(State, ?TDS_PKT_LOGIN, Data).
 
@@ -366,9 +379,9 @@ send(State, PacketType, Data) ->
     case gen_tcp:send(Socket, Packet) of
         ok ->
             send(State, PacketType, RestData);
-        {error, ErrorCode} ->
+        {error, Reason} ->
             State2 = State#sybclient{conn_state = disconnected},
-            {error, socket, ErrorCode, State2}
+            {error, socket, Reason, State2}
     end.
 
 recv(Socket, Timeout) ->
@@ -386,7 +399,7 @@ recv(Socket, Timeout, Buffer, ResultData) ->
                 {ok, NetworkData} ->
                     NewBuffer = <<Buffer/bits, NetworkData/bits>>,
                     recv(Socket, Timeout, NewBuffer, ResultData);
-                {error, ErrorCode} ->
-                    {error, socket, ErrorCode}
+                {error, Reason} ->
+                    {error, socket, Reason}
             end
     end.
