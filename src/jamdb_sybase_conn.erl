@@ -69,10 +69,11 @@ connect(Opts) ->
 
 -spec connect([env()]) -> empty_result().
 connect(Opts, Timeout) ->
-    Host = proplists:get_value(host, Opts, ?DEF_HOST), 
-    Port = proplists:get_value(port, Opts, ?DEF_PORT),
-    PacketSize = proplists:get_value(packet_size, Opts, ?DEF_PACKET_SIZE),
-    GenTcpOpts = [binary, {active, false}, {packet, raw}],
+    Host        = proplists:get_value(host, Opts, ?DEF_HOST), 
+    Port        = proplists:get_value(port, Opts, ?DEF_PORT),
+    Database    = proplists:get_value(database, Opts, ?DEF_DATABASE),
+    PacketSize  = proplists:get_value(packet_size, Opts, ?DEF_PACKET_SIZE),
+    GenTcpOpts  = [binary, {active, false}, {packet, raw}],
     case gen_tcp:connect(Host, Port, GenTcpOpts, Timeout) of
         {ok, Socket} ->
             State = #sybclient{
@@ -80,7 +81,12 @@ connect(Opts, Timeout) ->
                 packet_size   = PacketSize,
                 env           = Opts
             },
-            login(State, Timeout);
+            case login(State, Timeout) of
+                {ok, State3 = #sybclient{conn_state = connected}} ->
+                    system_query(State3, ["use ", Database], Timeout);
+                Error ->
+                    Error
+            end;
         {error, Reason} ->
             {error, socket, Reason}
     end.
@@ -160,14 +166,11 @@ close(State = #sybclient{conn_state = connected, socket=Socket}) ->
 login(State, Timeout) ->
     {ok, State2} = send_login_req(State),   %% TODO handle error
     case handle_empty_resp(State2, Timeout) of
-        {ok, State3 = #sybclient{conn_state = connected, env=Env}} ->
-            Database = proplists:get_value(database, Env, ?DEF_DATABASE),
-            system_query(State3, ["use ", Database], Timeout);
         {ok, State3 = #sybclient{conn_state = auth_negotiate}} ->
             %%TODO Negotiate
             {error, local, <<"Auth Negotiate not implemented">>, State3};
-        Error ->
-            Error
+        Other ->
+            Other
     end.
 
 system_query(State = #sybclient{conn_state=connected}, Query, Timeout) ->
