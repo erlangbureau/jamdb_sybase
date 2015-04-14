@@ -28,7 +28,7 @@ encode_login_record(EnvOpts) ->
     User            = proplists:get_value(user, EnvOpts),
     Pass            = proplists:get_value(password, EnvOpts),
     AppName         = proplists:get_value(app_name, EnvOpts, "erlang"),
-    LibName         = proplists:get_value(lib_name, EnvOpts, "spacejam"),
+    LibName         = proplists:get_value(lib_name, EnvOpts, "jamdb"),
     ServerName      = proplists:get_value(server_name, EnvOpts, ""),
     Language        = proplists:get_value(language, EnvOpts, "us_english"),
     Charset         = proplists:get_value(charset, EnvOpts, utf8),
