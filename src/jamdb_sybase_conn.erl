@@ -73,8 +73,9 @@ connect(Opts, Timeout) ->
     Port        = proplists:get_value(port, Opts, ?DEF_PORT),
     Database    = proplists:get_value(database, Opts, ?DEF_DATABASE),
     PacketSize  = proplists:get_value(packet_size, Opts, ?DEF_PACKET_SIZE),
-    GenTcpOpts  = [binary, {active, false}, {packet, raw}],
-    case gen_tcp:connect(Host, Port, GenTcpOpts, Timeout) of
+    SockOpts = [binary, {active, false}, {packet, raw}, 
+            {nodelay, true}, {keepalive, true}],
+    case gen_tcp:connect(Host, Port, SockOpts, Timeout) of
         {ok, Socket} ->
             State = #sybclient{
                 socket        = Socket, 
@@ -338,11 +339,12 @@ set_env([{Key, NewValue, _OldValue}|T], State) ->
 set_env([], State) ->
     State.
 
-set_env(packet_size = Key, NewValue, #sybclient{env=Env1} = State) ->
+set_env(packet_size = Key, NewValue, #sybclient{env = Env1} = State) ->
     Value = list_to_integer(binary_to_list(NewValue)), %%TODO
+    _ = inet:setopts(State#sybclient.socket, [{buffer, Value}]),
     Env2 = lists:keystore(Key, 1, Env1, {Key, Value}), 
-    State#sybclient{env = Env2};
-set_env(Key, NewValue, #sybclient{env=Env1} = State) ->
+    State#sybclient{env = Env2, packet_size = Value};
+set_env(Key, NewValue, #sybclient{env = Env1} = State) ->
     Env2 = lists:keystore(Key, 1, Env1, {Key, NewValue}),
     State#sybclient{env = Env2}.
 
