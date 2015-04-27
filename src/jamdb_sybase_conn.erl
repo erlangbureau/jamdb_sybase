@@ -397,7 +397,7 @@ recv(Socket, Timeout, Buffer, ResultData) ->
         {ok, 0, PacketBody, Buffer2} ->
             ResultData2 = <<ResultData/binary, PacketBody/binary>>,
             recv(Socket, Timeout, Buffer2, ResultData2);
-        {ok, 1, PacketBody, <<>>} ->
+        {ok, 1, PacketBody, _} ->
             {ok, <<ResultData/binary, PacketBody/binary>>};
         {error, incomplete_packet} ->
             case gen_tcp:recv(Socket, 0, Timeout) of
