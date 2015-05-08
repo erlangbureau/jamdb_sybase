@@ -209,11 +209,11 @@ simple_select(_Config) ->
     {ok, State} = jamdb_sybase_conn:connect(?Host, ?Port, ?Login, ?Password, ?Database),
     Tests = [
         {   
-            [{result_set,[<<>>,<<>>,<<>>],[],[[1,<<"test">>,undefined]]}],
+            [{result_set,[<<>>,<<>>,<<>>],[],[[1,<<"test">>,null]]}],
             <<"select 1, 'test', null">>
         },
         {   
-            [{result_set,[<<>>,<<>>,<<>>],[], [[1,<<"test">>,undefined]]}],
+            [{result_set,[<<>>,<<>>,<<>>],[], [[1,<<"test">>,null]]}],
             <<"select 1, 'test', null">>
         }
     ],
@@ -281,7 +281,7 @@ select_integer_types(_Config) ->
             [{result_set, [<<"U_BIG">>, <<"S_BIG">>, <<"U_INT">>, <<"S_INT">>, 
                         <<"U_SMALL">>,<<"S_SMALL">>, <<"U_TINY">>, <<"NUM">>], [],
                 [
-                    [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined],
+                    [null, null, null, null, null, null, null, null],
                     [18446744073709551615, -9223372036854775808, 
                         4294967295, -2147483648, 65535, -32768, 255, 
                         {numeric, 99999999999999999999999999999999999999, 2}]
@@ -355,7 +355,7 @@ select_char_types(_Config) ->
         {   
             [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>], [],
                 [
-                    [undefined, undefined, undefined, undefined, undefined, undefined],
+                    [null, null, null, null, null, null],
                     [<<"a         ">>, <<"t">>, <<"q">>, <<"z">>, <<"test1">>, <<"test2">>],
                     [<<"          ">>, <<" ">>, <<" ">>, <<" ">>, <<" ">>, <<" ">>]
                 ]}],
@@ -432,7 +432,7 @@ select_widetable(_Config) ->
         {   
             [{result_set,[<<"CHAR">>, <<"NCHAR">>, <<"VARCHAR">>, <<"NVARCHAR">>, <<"BINARY">>,<<"VARBINARY">>], [],
                 [
-                    [undefined, undefined, undefined, undefined, undefined, undefined],
+                    [null, null, null, null, null, null],
                     [LongAsciiString, LongAsciiString, LongAsciiString, LongAsciiString, LongAsciiString, LongAsciiString],
                     [LongEmptyString, <<" ">>, <<" ">>, <<" ">>, <<" ">>, <<" ">>]
                 ]}],
@@ -515,7 +515,7 @@ select_text_type(_Config) ->
         {   
             [{result_set,[<<"TEXT">>], [],
                 [
-                    [undefined],
+                    [null],
                     [<<"a">>],
                     [<<"test test test">>],
                     [<<" ">>]
@@ -560,7 +560,7 @@ select_float_types(_Config) ->
     Tests = [
         {   
             [{result_set, [<<"FLOAT">>,<<"REAL">>], [], [ 
-                [undefined, undefined], 
+                [null, null], 
                 [3.14, 3.140000104904175] 
             ]}],
             "select FLOAT, REAL from ERL_DRV_float_null_tests"
@@ -663,7 +663,7 @@ select_time_types(_Config) ->
             [{result_set,[<<"DATETIME">>, <<"SMALLDATETIME">>, 
                             <<"DATE">>, <<"TIME">>], [],
                         [
-                            [undefined, undefined, undefined, undefined],
+                            [null, null, null, null],
                             [{{2013,8,1},{16,0,0}}, {{2013,8,1},{16,0,0}}, 
                                 {date, {2013,8,1}}, {time, {16,0,0}}]
                         ]

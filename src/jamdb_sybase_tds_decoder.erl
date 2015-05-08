@@ -423,7 +423,7 @@ decode_data(Data, #format{format=text, usertype=UserType}) ->
     end.
 
 decode_value(<<>>, _UserType, _Scale) ->
-    undefined; %% null
+    null;
 decode_value(BinValue, UserType, _Scale) 
         when ?IS_ERL_INTEGER(UserType) ->
     BitLength = bit_size(BinValue) - 8,
@@ -458,7 +458,7 @@ decode_value(BinValue, UserType, Scale)
     end.
 
 decode_value(<<>>, _UserType) ->
-    undefined; %% null
+    null;
 decode_value(BinValue, UserType) when ?IS_ERL_BINARY(UserType) ->
     BinValue;
 decode_value(BinValue, UserType) when ?IS_ERL_UNSIGNED_INTEGER(UserType) ->
