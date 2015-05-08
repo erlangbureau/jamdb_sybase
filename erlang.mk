@@ -12,7 +12,7 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-.PHONY: all deps app rel docs tests clean distclean help erlang-mk
+.PHONY: all deps app rel docs install-docs tests check clean distclean help erlang-mk
 
 ERLANG_MK_VERSION = 1
 
@@ -46,6 +46,8 @@ all:: deps
 rel::
 	@echo -n
 
+check:: clean app tests
+
 clean:: clean-crashdump
 
 clean-crashdump:
@@ -63,15 +65,17 @@ help::
 		"Usage: [V=1] make [-jNUM] [target]" \
 		"" \
 		"Core targets:" \
-		"  all         Run deps, app and rel targets in that order" \
-		"  deps        Fetch dependencies (if needed) and compile them" \
-		"  app         Compile the project" \
-		"  rel         Build a release for this project, if applicable" \
-		"  docs        Build the documentation for this project" \
-		"  tests       Run the tests for this project" \
-		"  clean       Delete temporary and output files from most targets" \
-		"  distclean   Delete all temporary and output files" \
-		"  help        Display this help and exit" \
+		"  all           Run deps, app and rel targets in that order" \
+		"  deps          Fetch dependencies (if needed) and compile them" \
+		"  app           Compile the project" \
+		"  rel           Build a release for this project, if applicable" \
+		"  docs          Build the documentation for this project" \
+		"  install-docs  Install the man pages for this project" \
+		"  tests         Run the tests for this project" \
+		"  check         Compile and run all tests and analysis for this project" \
+		"  clean         Delete temporary and output files from most targets" \
+		"  distclean     Delete all temporary and output files" \
+		"  help          Display this help and exit" \
 		"" \
 		"The target clean only removes files that are commonly removed." \
 		"Dependencies and releases are left untouched." \
@@ -140,9 +144,10 @@ PKG_FILE_URL ?= https://raw.githubusercontent.com/ninenines/erlang.mk/master/pac
 deps:: $(ALL_DEPS_DIRS)
 	@for dep in $(ALL_DEPS_DIRS) ; do \
 		if [ -f $$dep/GNUmakefile ] || [ -f $$dep/makefile ] || [ -f $$dep/Makefile ] ; then \
-			$(MAKE) -C $$dep ; \
+			$(MAKE) -C $$dep || exit $$? ; \
 		else \
-			echo "include $(CURDIR)/erlang.mk" | ERLC_OPTS=+debug_info $(MAKE) -f - -C $$dep ; \
+			echo "ERROR: No makefile to build dependency $$dep. Consider adding it to AUTOPATCH." ; \
+			exit 1 ; \
 		fi ; \
 	done
 
@@ -154,7 +159,8 @@ define dep_autopatch
 	$(ERL) -eval " \
 DepDir = \"$(DEPS_DIR)/$(1)/\", \
 fun() -> \
-	{ok, Conf} = file:consult(DepDir ++ \"rebar.config\"), \
+	{ok, Conf} = case file:consult(DepDir ++ \"rebar.config\") of \
+		{error, enoent} -> {ok, []}; Res -> Res end, \
 	File = case lists:keyfind(deps, 1, Conf) of false -> []; {_, Deps} -> \
 		[begin {Method, Repo, Commit} = case Repos of \
 			{git, R} -> {git, R, master}; \
@@ -165,7 +171,12 @@ fun() -> \
 		io_lib:format(\"DEPS += ~s\ndep_~s = ~s ~s ~s~n\", [Name, Name, Method, Repo, Commit]) \
 		end || {Name, _, Repos} <- Deps] \
 	end, \
-	ok = file:write_file(\"$(DEPS_DIR)/$(1)/Makefile\", [\"ERLC_OPTS = +debug_info\n\n\", File, \"\ninclude erlang.mk\"]) \
+	First = case lists:keyfind(erl_first_files, 1, Conf) of false -> []; {_, Files} -> \
+		Names = [[\" \", begin \"lre.\" ++ R = lists:reverse(F), lists:reverse(R) end] \
+			 || \"src/\" ++ F <- Files], \
+		io_lib:format(\"COMPILE_FIRST +=~s\n\", [Names]) \
+	end, \
+	ok = file:write_file(\"$(DEPS_DIR)/$(1)/Makefile\", [\"ERLC_OPTS = +debug_info\n\n\", File, First, \"\ninclude erlang.mk\"]) \
 end(), \
 AppSrcOut = \"$(DEPS_DIR)/$(1)/src/$(1).app.src\", \
 AppSrcIn = case filelib:is_regular(AppSrcOut) of false -> \"$(DEPS_DIR)/$(1)/ebin/$(1).app\"; true -> AppSrcOut end, \
@@ -194,6 +205,8 @@ define dep_fetch
 		cd $(DEPS_DIR)/$(1) && hg update -q $$$$COMMIT; \
 	elif [ "$$$$VS" = "svn" ]; then \
 		svn checkout $$$$REPO $(DEPS_DIR)/$(1); \
+	elif [ "$$$$VS" = "cp" ]; then \
+		cp -R $$$$REPO $(DEPS_DIR)/$(1); \
 	else \
 		echo "Unknown or invalid dependency: $(1). Please consult the erlang.mk README for instructions." >&2; \
 		exit 78; \
@@ -217,13 +230,9 @@ else
 	$(call dep_fetch,$(1))
 endif
 ifneq ($(filter $(1),$(AUTOPATCH)),)
-	$(call dep_autopatch_verbose,$(1)) if [ -f $(DEPS_DIR)/$(1)/rebar.config ]; then \
+	$(call dep_autopatch_verbose,$(1)) \
 		$(call dep_autopatch,$(1)); \
-		cd $(DEPS_DIR)/$(1)/ && ln -s ../../erlang.mk; \
-	elif [ ! -f $(DEPS_DIR)/$(1)/Makefile ]; then \
-		echo "ERLC_OPTS = +debug_info\ninclude erlang.mk" > $(DEPS_DIR)/$(1)/Makefile; \
-		cd $(DEPS_DIR)/$(1)/ && ln -s ../../erlang.mk; \
-	fi
+		cd $(DEPS_DIR)/$(1)/ && ln -s ../../erlang.mk
 endif
 endef
 
@@ -369,6 +378,22 @@ clean-app:
 	$(gen_verbose) rm -rf ebin/ priv/mibs/ \
 		$(addprefix include/,$(addsuffix .hrl,$(notdir $(basename $(wildcard mibs/*.mib)))))
 
+# Copyright (c) 2015, Viktor Söderqvist <viktor@zuiderkwast.se>
+# This file is part of erlang.mk and subject to the terms of the ISC License.
+
+.PHONY: docs-deps
+
+# Configuration.
+
+ALL_DOC_DEPS_DIRS = $(addprefix $(DEPS_DIR)/,$(DOC_DEPS))
+
+# Targets.
+
+$(foreach dep,$(DOC_DEPS),$(eval $(call dep_target,$(dep))))
+
+doc-deps: $(ALL_DOC_DEPS_DIRS)
+	@for dep in $(ALL_DOC_DEPS_DIRS) ; do $(MAKE) -C $$dep; done
+
 # Copyright (c) 2015, Loïc Hoguin <essen@ninenines.eu>
 # This file is part of erlang.mk and subject to the terms of the ISC License.
 
@@ -413,6 +438,53 @@ clean-test-dir:
 ifneq ($(wildcard $(TEST_DIR)/*.beam),)
 	$(gen_verbose) rm -f $(TEST_DIR)/*.beam
 endif
+
+# Copyright (c) 2015, Loïc Hoguin <essen@ninenines.eu>
+# This file is part of erlang.mk and subject to the terms of the ISC License.
+
+.PHONY: asciidoc asciidoc-guide asciidoc-manual install-asciidoc distclean-asciidoc
+
+MAN_INSTALL_PATH ?= /usr/local/share/man
+MAN_SECTIONS ?= 3 7
+
+docs:: asciidoc
+
+asciidoc: distclean-asciidoc doc-deps asciidoc-guide asciidoc-manual
+
+ifeq ($(wildcard doc/src/guide/book.asciidoc),)
+asciidoc-guide:
+else
+asciidoc-guide:
+	a2x -v -f pdf doc/src/guide/book.asciidoc && mv doc/src/guide/book.pdf doc/guide.pdf
+	a2x -v -f chunked doc/src/guide/book.asciidoc && mv doc/src/guide/book.chunked/ doc/html/
+endif
+
+ifeq ($(wildcard doc/src/manual/*.asciidoc),)
+asciidoc-manual:
+else
+asciidoc-manual:
+	for f in doc/src/manual/*.asciidoc ; do \
+		a2x -v -f manpage $$f ; \
+	done
+	for s in $(MAN_SECTIONS); do \
+		mkdir -p doc/man$$s/ ; \
+		mv doc/src/manual/*.$$s doc/man$$s/ ; \
+		gzip doc/man$$s/*.$$s ; \
+	done
+
+install-docs:: install-asciidoc
+
+install-asciidoc: asciidoc-manual
+	for s in $(MAN_SECTIONS); do \
+		mkdir -p $(MAN_INSTALL_PATH)/man$$s/ ; \
+		install -g 0 -o 0 -m 0644 doc/man$$s/*.gz $(MAN_INSTALL_PATH)/man$$s/ ; \
+	done
+endif
+
+distclean:: distclean-asciidoc
+
+distclean-asciidoc:
+	$(gen_verbose) rm -rf doc/html/ doc/guide.pdf doc/man3/ doc/man7/
 
 # Copyright (c) 2014-2015, Loïc Hoguin <essen@ninenines.eu>
 # This file is part of erlang.mk and subject to the terms of the ISC License.
@@ -921,6 +993,8 @@ DIALYZER_OPTS ?= -Werror_handling -Wrace_conditions \
 
 # Core targets.
 
+check:: dialyze
+
 distclean:: distclean-plt
 
 help::
@@ -947,10 +1021,9 @@ endif
 	@dialyzer --no_native $(DIALYZER_DIRS) $(DIALYZER_OPTS)
 
 # Copyright (c) 2013-2015, Loïc Hoguin <essen@ninenines.eu>
-# Copyright (c) 2015, Viktor Söderqvist <viktor@zuiderkwast.se>
 # This file is part of erlang.mk and subject to the terms of the ISC License.
 
-.PHONY: distclean-edoc build-doc-deps
+.PHONY: distclean-edoc edoc
 
 # Configuration.
 
@@ -958,19 +1031,14 @@ EDOC_OPTS ?=
 
 # Core targets.
 
-docs:: distclean-edoc build-doc-deps
-	$(gen_verbose) $(ERL) -eval 'edoc:application($(PROJECT), ".", [$(EDOC_OPTS)]), halt().'
+docs:: distclean-edoc edoc
 
 distclean:: distclean-edoc
 
 # Plugin-specific targets.
 
-DOC_DEPS_DIRS = $(addprefix $(DEPS_DIR)/,$(DOC_DEPS))
-
-$(foreach dep,$(DOC_DEPS),$(eval $(call dep_target,$(dep))))
-
-build-doc-deps: $(DOC_DEPS_DIRS)
-	@for dep in $(DOC_DEPS_DIRS) ; do $(MAKE) -C $$dep; done
+edoc: doc-deps
+	$(gen_verbose) $(ERL) -eval 'edoc:application($(PROJECT), ".", [$(EDOC_OPTS)]), halt().'
 
 distclean-edoc:
 	$(gen_verbose) rm -f doc/*.css doc/*.html doc/*.png doc/edoc-info
@@ -1176,7 +1244,7 @@ RELX_CONFIG ?= $(CURDIR)/relx.config
 RELX ?= $(CURDIR)/relx
 export RELX
 
-RELX_URL ?= https://github.com/erlware/relx/releases/download/v1.2.0/relx
+RELX_URL ?= https://github.com/erlware/relx/releases/download/v1.3.1/relx
 RELX_OPTS ?=
 RELX_OUTPUT_DIR ?= _rel
 
@@ -1273,3 +1341,42 @@ triq: test-build
 	$(gen_verbose) $(call triq_run,[true] =:= lists:usort([triq:check(M) || M <- [$(MODULES)]]))
 endif
 endif
+
+# Copyright (c) 2015, Euen Lopez <euen@inakanetworks.com>
+# This file is part of erlang.mk and subject to the terms of the ISC License.
+
+.PHONY: xref distclean-xref
+
+# Configuration.
+
+ifeq ($(XREF_CONFIG),)
+	XREF_ARGS :=
+else
+	XREF_ARGS := -c $(XREF_CONFIG)
+endif
+
+XREFR ?= $(CURDIR)/xrefr
+export XREFR
+
+XREFR_URL ?= https://github.com/inaka/xref_runner/releases/download/0.2.0/xrefr
+
+# Core targets.
+
+help::
+	@printf "%s\n" "" \
+		"Xref targets:" \
+		"	xref				Run Xrefr using $XREF_CONFIG as config file if defined"
+
+distclean:: distclean-xref
+
+# Plugin-specific targets.
+
+$(XREFR):
+	@$(call core_http_get,$(XREFR),$(XREFR_URL))
+	@chmod +x $(XREFR)
+
+xref: deps app $(XREFR)
+	$(gen_verbose) $(XREFR) $(XREFR_ARGS)
+
+distclean-xref:
+	$(gen_verbose) rm -rf $(XREFR)
