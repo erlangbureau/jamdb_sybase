@@ -47,7 +47,7 @@ The default encoding in Erlang is utf8. So jamdb_sybase sending all strings to t
 
 TDS Protocol References
 =======================
-* [Official TDS 5.0 Specification, version 3.8, January 2006](http://www.sybase.com/content/1040983/Sybase-tds38-102306.pdf)
+* [Official TDS 5.0 Specification, version 3.8, January 2006](http://ondoc.logand.com/d/2219/pdf)
 * [FreeTDS Documentation (C)](http://www.freetds.org)
 * [jTDS Documentation (Java)](http://jtds.sourceforge.net/doc.html)
 
