@@ -5,12 +5,8 @@
 -export([reconnect/1]).
 -export([disconnect/1, disconnect/2]).
 -export([sql_query/2, sql_query/3]).
-%-export([prepare/3, unprepare/2]).
-%-export([execute/3]).
-
-%% deprecated API
--export([connect/5]).
--export([close/1]).
+-export([prepare/3]).
+-export([execute/3, execute/4]).
 
 -include("TDS_5_0.hrl").
 -include("jamdb_sybase.hrl").
@@ -101,7 +97,7 @@ disconnect(#sybclient{conn_state=connected, socket=Socket, env=Env}, 0) ->
     ok = gen_tcp:close(Socket),
     {ok, Env};
 disconnect(State = #sybclient{conn_state=connected, socket=Socket, env=Env}, Timeout) ->
-    Data = ?ENCODER:encode_token_logout(),
+    Data = ?ENCODER:encode_token({logout, []}),
     try send(State, ?TDS_PKT_QUERY, Data) of
         {ok, State2} -> 
             _ = handle_empty_resp(State2, Timeout);
@@ -125,58 +121,55 @@ sql_query(State, Query) ->
 
 -spec sql_query(state(), string(), timeout()) -> query_reult().
 sql_query(State = #sybclient{conn_state = connected}, Query, Timeout) ->
-    {ok, State2} = send_query_req(State, Query),    %% TODO handle error
-    handle_resp(State2, Timeout).
+    case send_query_req(State, Query) of
+        {ok, State2}    -> handle_resp(State2, Timeout);
+        Error           -> Error
+    end.
 
-%prepare(State, Stmt, Query) ->
-%    {ok, State2} = send_prepare_req(State, Stmt, Query),
-%    handle_resp(State2).
-%    {ok, State2}.
+prepare(State = #sybclient{conn_state = connected}, Stmt, Query) ->
+    %% TODO get in and out params
+    case send_prepare_req(State, Stmt, Query) of
+        {ok, State2}    -> handle_empty_resp(State2, ?DEF_TIMEOUT);
+        Error           -> Error
+    end.
 
 %unprepare(State, _Stmt) ->
 %    {ok, State}.
 
-%execute(State, Stmt, Args) ->
-%    {ok, State2} = send_execute_req(State, Stmt, Args),
-%    handle_resp(State2).
-%    {ok, State2}.
+execute(State, Stmt, Args) ->
+    execute(State, Stmt, Args, ?DEF_TIMEOUT).
 
-%% Deprecated
--spec connect(string(), inet:port_number(), string(), string(), string())
-    -> empty_result().
-connect(Host, Port, User, Password, Database) ->
-    Env = [
-        {host, Host},
-        {port, Port},
-        {user, User},
-        {password, Password},
-        {database, Database}
-    ],
-    connect(Env).
-
-%% Deprecated
--spec close(state()) -> {ok, state()}.
-close(State = #sybclient{conn_state = connected, socket=Socket}) ->
-    Data = ?ENCODER:encode_token_logout(),
-    {ok, State2} = send(State, ?TDS_PKT_QUERY, Data),
-    {ok, State3} = handle_empty_resp(State2, ?DEF_TIMEOUT),
-    ok = gen_tcp:close(Socket),
-    {ok, State3#sybclient{socket=undefined, conn_state = disconnected}}.
+execute(State = #sybclient{conn_state = connected}, Stmt, Args, Timeout) ->
+    %% TODO send in params
+    HasArgs = case Args of
+        [] -> ?TDS_DYNAMIC_UNUSED;
+        _ -> ?TDS_DYNAMIC_HASARGS
+    end,
+    case send_execute_req(State, [HasArgs], Stmt) of
+        {ok, State2}    -> handle_resp(State2, Timeout);
+        Error           -> Error
+    end.
 
 %% internal
 login(State, Timeout) ->
-    {ok, State2} = send_login_req(State),   %% TODO handle error
-    case handle_empty_resp(State2, Timeout) of
-        {ok, State3 = #sybclient{conn_state = auth_negotiate}} ->
-            %%TODO Negotiate
-            {error, local, <<"Auth Negotiate not implemented">>, State3};
-        Other ->
-            Other
+    case send_login_req(State) of
+        {ok, State2} ->
+            case handle_empty_resp(State2, Timeout) of
+                {ok, State3 = #sybclient{conn_state = auth_negotiate}} ->
+                    %%TODO Negotiate
+                    {error, local, <<"Auth Negotiate not implemented">>, State3};
+                Other ->
+                    Other
+            end;
+        Error ->
+            Error
     end.
 
 system_query(State = #sybclient{conn_state=connected}, Query, Timeout) ->
-    {ok, State2} = send_query_req(State, Query), %% TODO handle error
-    handle_empty_resp(State2, Timeout).
+    case send_query_req(State, Query) of
+        {ok, State2}    -> handle_empty_resp(State2, Timeout);
+        Error           -> Error
+    end.
 
 send_login_req(#sybclient{env=Env} = State) ->
     Data = ?ENCODER:encode_login_record(Env),
@@ -184,18 +177,22 @@ send_login_req(#sybclient{env=Env} = State) ->
 
 send_query_req(State, Query) ->
     BinaryQuery = unicode:characters_to_binary(Query),
-    Data = ?ENCODER:encode_token_language(BinaryQuery),
+    Data = ?ENCODER:encode_token({language, BinaryQuery}),
     send(State, ?TDS_PKT_QUERY, Data).
 
-%send_prepare_req(State, StmtId, Query) ->
-%    BQuery = unicode:characters_to_binary(Query),
-%    BStmtId = unicode:characters_to_binary(StmtId),
-%    Data = ?ENCODER:encode_token_dynamic(?TDS_DYN_PREPARE, [], BStmtId, BQuery),
-%    send(State, ?TDS_PKT_QUERY, Data).
+send_prepare_req(State, StmtId, Query) ->
+    BStmtId = unicode:characters_to_binary(StmtId),
+    BQuery1 = unicode:characters_to_binary(Query),
+    BQuery2 = <<"create proc ", BStmtId/binary, " as ", BQuery1/binary>>,
+    Token = {dynamic, ?TDS_DYN_PREPARE, [], BStmtId, BQuery2},
+    Data = ?ENCODER:encode_token(Token),
+    send(State, ?TDS_PKT_QUERY, Data).
 
-%send_execute_req(State, StmtId, _Args) ->
-%    Data = ?ENCODER:encode_token_dynamic(?TDS_DYN_EXEC, [], StmtId, <<"">>),
-%    send(State, ?TDS_PKT_QUERY, Data).
+send_execute_req(State, Status, StmtId) ->
+    BStmtId = unicode:characters_to_binary(StmtId),
+    Token = {dynamic, ?TDS_DYN_EXEC, Status, BStmtId, <<>>},
+    Data = ?ENCODER:encode_token(Token),
+    send(State, ?TDS_PKT_QUERY, Data).
 
 handle_empty_resp(State, Timeout) ->
     case handle_resp(State, Timeout) of
@@ -217,7 +214,7 @@ handle_resp(State = #sybclient{socket=Socket}, Timeout) ->
 
 handle_resp(Data, TokensBufer, ResultSets, State) ->
     case ?DECODER:decode_token(Data, TokensBufer) of
-        {{done, StatusFlags, _TransactState, Rows}, RestData} ->
+        {ok, {done, StatusFlags, _TransactState, Rows}, RestData} ->
             TokensBuferR = lists:reverse(TokensBufer),
             case get_result(StatusFlags, Rows, TokensBuferR, ResultSets) of
                 {more, TokensBuferR2, ResultSets2} ->
@@ -226,23 +223,23 @@ handle_resp(Data, TokensBufer, ResultSets, State) ->
                 Result ->
                     erlang:append_element(Result, State)
             end;
-        {{loginack, ConnState, TdsVersion, Server}, RestData} ->
+        {ok, {loginack, ConnState, TdsVersion, Server}, RestData} ->
              State2 = State#sybclient{
                 conn_state  = ConnState,
                 tds_ver     = TdsVersion,
                 server      = Server
             },
             handle_resp(RestData, TokensBufer, ResultSets, State2);
-        {{capability, ReqCap, RespCap}, RestData} ->
+        {ok, {capability, ReqCap, RespCap}, RestData} ->
             State2 = State#sybclient{
                 req_capabilities    = ReqCap,
                 resp_capabilities   = RespCap
             },
             handle_resp(RestData, TokensBufer, ResultSets, State2);
-        {{envchange, EnvChange}, RestData} ->
+        {ok, {envchange, EnvChange}, RestData} ->
             State2 = set_env(EnvChange, State),
             handle_resp(RestData, TokensBufer, ResultSets, State2);
-        {TokenTuple, RestData} ->
+        {ok, TokenTuple, RestData} ->
             handle_resp(RestData, [TokenTuple|TokensBufer], ResultSets, State)
     end.
 

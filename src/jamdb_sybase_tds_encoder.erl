@@ -3,10 +3,7 @@
 %% API
 -export([encode_packet/3]).
 -export([encode_login_record/1]).
--export([encode_token_logout/0]).
--export([encode_token_language/1]).
--export([encode_token_dynamic/4]).
--export([encode_token_dbrpc/2]).
+-export([encode_token/1]).
 
 -include("TDS_5_0.hrl").
 -include("jamdb_sybase.hrl").
@@ -68,13 +65,25 @@ encode_login_record(EnvOpts) ->
         (encode_token_capability())/binary
     >>.
 
-encode_token_logout() ->
+encode_token(Token) ->
+    case Token of
+        {language, Query} ->
+            encode_language_token(Query);
+        {dynamic, Type, Status, Id, Stmt} ->
+            encode_dynamic_token(Type, Status, Id, Stmt);
+        {dbrpc, RpcName, Options} ->
+            encode_dbrpc_token(RpcName, Options);
+        {logout, Opts} ->
+            encode_logout_token(Opts)
+    end.
+
+encode_logout_token(_Opts) ->
     <<
         ?TDS_TOKEN_LOGOUT, 
         0   %% Options: no options
     >>.
 
-encode_token_language(Query) ->
+encode_language_token(Query) ->
     <<
         ?TDS_TOKEN_LANGUAGE, 
         (byte_size(Query)+1):32,    %% token length
@@ -82,17 +91,21 @@ encode_token_language(Query) ->
         Query/binary
     >>.
 
-%% If TDS_PROTO_DYNAMIC capability is enabled (1) the TDS_DYN_DESCOUT/DESCIN protocol is used tosend input and output formats to a client.
-%% If TDS_PROTO_DYNAMIC capability is disabled (0), the format information is sent back automatically by the serverat TDS_DYN_PREPARE time.
-%% If TDS_PROTO_DYNPROC capability is enabled (1) a client library will prepend “create proc” in the Stmt field of the TDS_DYN_PREPARE data stream. 
-%% If TDS_PROTO_DYNPROC capability is disabled (0) a client library will just send the Stmt information un-modified.
-encode_token_dynamic(Type, Status, Id, Stmt) ->
+%% If TDS_PROTO_DYNAMIC (CS_PROTO_DYNAMIC) capability is enabled (1),
+%%   the TDS_DYN_DESCOUT/DESCIN protocol is used tosend input and output formats to a client.
+%% If TDS_PROTO_DYNAMIC (CS_PROTO_DYNAMIC) capability is disabled (0), 
+%%   the format information is sent back automatically by the serverat TDS_DYN_PREPARE time.
+%% If TDS_PROTO_DYNPROC (CS_PROTO_DYNPROC) capability is enabled (1),
+%%   a client library will prepend “create proc” in the Stmt field of the TDS_DYN_PREPARE data stream. 
+%% If TDS_PROTO_DYNPROC (CS_PROTO_DYNPROC) capability is disabled (0),
+%%   a client library will just send the Stmt information un-modified.
+encode_dynamic_token(Type, Status, Id, Stmt) ->
     StmtLen = byte_size(Stmt),
     IdLen = byte_size(Id),
-    case StmtLen < 32765 - IdLen of
+    case (StmtLen < 32765 - IdLen) of
         true ->
             <<
-                ?TDS_TOKEN_DYNAMIC, 
+                ?TDS_TOKEN_DYNAMIC,
                 (5 + IdLen + StmtLen):16,   %% Token Length
                 Type:8,                     %% type of dynamic operation
                 (encode_bit_mask(Status)):8,%% status
@@ -132,7 +145,7 @@ encode_token_dynamic(Type, Status, Id, Stmt) ->
 %% The TDS_DBRPC token will be used by clients if the TDS_REQ_PARAM capability bit is true
 %% The TDS_DBRPC2 token will be used by clients only if the TDS_REQ_DBRPC2 capability bit is true.
 %% Return parameters will be returned to a client using the TDS_PARAMFMT/PARAMS tokens if the TDS_RES_NOPARAM capability bit is false.
-encode_token_dbrpc(RpcName, Options) ->
+encode_dbrpc_token(RpcName, Options) ->
     RpcNameLen = byte_size(RpcName),
     case RpcNameLen < 255 of
         true ->
@@ -279,7 +292,7 @@ encode_token_capability() ->
         1:1,    %% 51:Support 8 byte integers (CS_DATA_INT8)
         1:1,    %% 50:Support NULL bits (CS_DATA_BITN)
         1:1,    %% 49:Support NULL floats (CS_DATA_FLTN)
-        0:1,    %% 48:Pre-pend “create proc” to dynamic prepare statements (CS_PROTO_DYNPROC)
+        1:1,    %% 48:Pre-pend “create proc” to dynamic prepare statements (CS_PROTO_DYNPROC)
     
         1:1,    %% 47:Use DESCIN/DESCOUT dynamic protocol (CS_PROTO_DYNAMIC)
         0:1,    %% 46:Support boundary security data types (CS_DATA_BOUNDARY)

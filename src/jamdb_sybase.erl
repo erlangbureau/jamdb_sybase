@@ -5,6 +5,8 @@
 -export([start_link/1, start/1]).
 -export([stop/1]).
 -export([sql_query/2, sql_query/3]).
+-export([prepare/3]).
+-export([execute/3, execute/4]).
 
 %% gen_server callbacks
 -export([init/1, terminate/2]).
@@ -32,6 +34,15 @@ sql_query(Pid, Query) ->
 sql_query(Pid, Query, Timeout) ->
     call_infinity(Pid, {sql_query, Query, Timeout}).
 
+prepare(Pid, Stmt, Query) ->
+    call_infinity(Pid, {prepare, Stmt, Query}).
+
+execute(Pid, Stmt, Args) ->
+    execute(Pid, Stmt, Args, ?DEF_TIMEOUT).
+
+execute(Pid, Stmt, Args, Timeout) ->
+    call_infinity(Pid, {execute, Stmt, Args, Timeout}).
+
 %% gen_server callbacks
 init(Opts) ->
     {ok, State} = jamdb_sybase_conn:connect(Opts),
@@ -43,7 +54,7 @@ handle_call({sql_query, Query, Timeout}, _From, State) ->
         {ok, Result, State2} -> 
             {reply, {ok, Result}, State2};
         {error, socket, Reason, State2} ->
-            {ok, State3} = jamdb_sybase_conn:reconnect(State2), %% TODO error
+            {ok, State3} = jamdb_sybase_conn:reconnect(State2), %% TODO reconnect on req
             {reply, {error, socket, Reason}, State3};
         {error, Type, Reason, State2} ->
             {reply, {error, Type, Reason}, State2}
@@ -54,11 +65,47 @@ handle_call({sql_query, Query, Timeout}, _From, State) ->
                 {reason, Reason},
                 {stacktrace, Stacktrace}
             ],
-            {ok, State2} = jamdb_sybase_conn:reconnect(State),
+            {ok, State2} = jamdb_sybase_conn:reconnect(State), %% TODO reconnect on req
             {reply, {error, local, {unknown_error, ErrDesc}}, State2}
     end;
-%handle_call({prepare, Query}, _From, State) ->
-%handle_call({execute, Query}, _From, State) ->
+handle_call({prepare, Stmt, Query}, _From, State) ->
+    try jamdb_sybase_conn:prepare(State, Stmt, Query) of
+        {ok, State2} -> 
+            {reply, ok, State2};
+        {error, socket, Reason, State2} ->
+            {ok, State3} = jamdb_sybase_conn:reconnect(State2), %% TODO reconnect on req
+            {reply, {error, socket, Reason}, State3};
+        {error, Type, Reason, State2} ->
+            {reply, {error, Type, Reason}, State2}
+    catch
+        _Class:Reason ->
+            Stacktrace = erlang:get_stacktrace(),
+            ErrDesc = [
+                {reason, Reason},
+                {stacktrace, Stacktrace}
+            ],
+            {ok, State2} = jamdb_sybase_conn:reconnect(State), %% TODO reconnect on req
+            {reply, {error, local, {unknown_error, ErrDesc}}, State2}
+    end;
+handle_call({execute, Stmt, Args, Timeout}, _From, State) ->
+    try jamdb_sybase_conn:execute(State, Stmt, Args, Timeout) of
+        {ok, Result, State2} -> 
+            {reply, {ok, Result}, State2};
+        {error, socket, Reason, State2} ->
+            {ok, State3} = jamdb_sybase_conn:reconnect(State2), %% TODO reconnect on req
+            {reply, {error, socket, Reason}, State3};
+        {error, Type, Reason, State2} ->
+            {reply, {error, Type, Reason}, State2}
+    catch
+        _Class:Reason ->
+            Stacktrace = erlang:get_stacktrace(),
+            ErrDesc = [
+                {reason, Reason},
+                {stacktrace, Stacktrace}
+            ],
+            {ok, State2} = jamdb_sybase_conn:reconnect(State), %% TODO reconnect on req
+            {reply, {error, local, {unknown_error, ErrDesc}}, State2}
+    end;
 handle_call(stop, _From, State) ->
     {ok, _InitOpts} = jamdb_sybase_conn:disconnect(State),
     {stop, normal, ok, State};

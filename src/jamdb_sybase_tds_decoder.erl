@@ -141,15 +141,30 @@ decode_token(<<Token, Data/binary>>, TokensBufer) ->
         ?TDS_TOKEN_CONTROL ->       decode_control_token(Data);
         ?TDS_TOKEN_RETURNVALUE ->   decode_returnvalue_token(Data);
         ?TDS_TOKEN_RETURNSTATUS ->  decode_returnstatus_token(Data);
-        %?TDS_TOKEN_DYNAMIC ->       decode_dynamic_token(Data);
+        ?TDS_TOKEN_DYNAMIC ->       decode_dynamic_token(Data);
+        ?TDS_TOKEN_DYNAMIC2 ->      decode_dynamic2_token(Data);
         _ ->
             %io:format("Unknown Token: ~p Data: ~p~n", [Token, Data]),
             {error, unknown_tds_token}
     end.
 
-%decode_dynamic_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
-%    io:format("DynamicToken: ~p~n", [TokenData]),
-%    {{dynamic, TokenData}, Rest}.
+decode_dynamic_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
+    case TokenData of
+        <<?TDS_DYN_ACK, Status, IdLen, Id:IdLen/binary>> ->
+            {ok, {dynamic, Status, Id}, Rest};
+        _ ->
+            io:format("Bad Dynamic Type: ~p~n", [TokenData]),
+            {error, unsupported_dynamic_type}
+    end.
+
+decode_dynamic2_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
+    case TokenData of
+        <<?TDS_DYN_ACK, Status, IdLen, Id:IdLen/binary>> ->
+            {ok, {dynamic, Status, Id}, Rest};
+        _ ->
+            io:format("Bad Dynamic2 Type: ~p~n", [TokenData]),
+            {error, unsupported_dynamic_type}
+    end.
 
 %% internal
 decode_loginack_token(<<_Len:16, Status, TdsVersion:4/binary, SrvNameLen, 
@@ -159,11 +174,11 @@ decode_loginack_token(<<_Len:16, Status, TdsVersion:4/binary, SrvNameLen,
         ?TDS_LOG_NEGOTIATE  -> auth_negotiate;
         ?TDS_LOG_FAIL       -> disconnected
     end,
-    {{loginack, ConnState, TdsVersion, {SrvName, SrvVersion}}, Rest}.
+    {ok, {loginack, ConnState, TdsVersion, {SrvName, SrvVersion}}, Rest}.
 
 decode_capability_token(<<_Len:16, 1, ReqLen, Req:ReqLen/binary, 
         2, RespLen, Resp:RespLen/binary, Rest/binary>>) ->
-    {{capability, [Req], [Resp]}, Rest}.
+    {ok, {capability, [Req], [Resp]}, Rest}.
 
 decode_message_token(<<_Len:16, MsgNumber:32, MsgState, Class, SQLStateLen, 
         SQLState:SQLStateLen/binary, Status, TransactionState:16,
@@ -183,7 +198,7 @@ decode_message_token(<<_Len:16, MsgNumber:32, MsgState, Class, SQLStateLen,
         procedure_name      = ProcedureName,
         line_number         = LineNumber
     },
-    {Msg, Rest}.
+    {ok, Msg, Rest}.
 
 envtype_to_atom(?ENV_DB)         -> database;
 envtype_to_atom(?ENV_LANG)       -> language;
@@ -196,11 +211,11 @@ decode_envchange_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
         || <<Type, NVLen, NewValue:NVLen/binary, 
                 OVLen, OldValue:OVLen/binary>> <= TokenData
     ],
-    {{envchange, EnvChange}, Rest}.
+    {ok, {envchange, EnvChange}, Rest}.
 
 decode_control_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     Fmts = [ Fmt || <<Length, Fmt:Length/binary>> <= TokenData],
-    {{control, lists:reverse(Fmts)}, Rest}.
+    {ok, {control, lists:reverse(Fmts)}, Rest}.
 
 decode_done_token(<<Status:2/binary, TransState:16, AffectedRows:32, Rest/binary>>) ->
     <<_:9, Evnt:1, Attn:1, Cnt:1, Proc:1, InXAct:1, Err:1, More:1>> = Status,
@@ -214,7 +229,7 @@ decode_done_token(<<Status:2/binary, TransState:16, AffectedRows:32, Rest/binary
         {more, More}
     ],
     Flags = [K || {K, V} <- StatusFlags, V =/= 0],
-    {{done, Flags, TransState, AffectedRows}, Rest}.
+    {ok, {done, Flags, TransState, AffectedRows}, Rest}.
 
 %decode_status(StatusFlags, StatusBits) ->
 %    FlagsCount = length(StatusFlags),
@@ -226,58 +241,58 @@ decode_done_token(<<Status:2/binary, TransState:16, AffectedRows:32, Rest/binary
 
 decode_orderby_token(<<Columns:16, Rest/binary>>) ->
     {Order, Rest2} = decode_orderby_sequence(Rest, 8, Columns, []),
-    {{orderby, Order}, Rest2}.
+    {ok, {orderby, Order}, Rest2}.
 
 decode_orderby2_token(<<_Len:32, Columns:16, Rest/binary>>) ->
     {Order, Rest2} = decode_orderby_sequence(Rest, 16, Columns, []),
-    {{orderby, Order}, Rest2}.
+    {ok, {orderby, Order}, Rest2}.
 
 decode_orderby_sequence(Rest, _Size, 0, Sequence) ->
-    {lists:reverse(Sequence), Rest};
+    {ok, lists:reverse(Sequence), Rest};
 decode_orderby_sequence(Data, Size, Count, Sequence) ->
     <<Column:Size, Rest/binary>> = Data,
     decode_orderby_sequence(Rest, Size, Count-1, [Column|Sequence]).
 
 decode_returnstatus_token(<<Status:32/signed, Rest/binary>>) ->
-    {{returnstatus, Status}, Rest}.
+    {ok, {returnstatus, Status}, Rest}.
 
 decode_returnvalue_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
-    {Format, RestData} = decode_data_format(TokenData, returnvalue),
+    {ok, Format, RestData} = decode_data_format(TokenData, returnvalue),
     {Value, <<>>} = decode_data(RestData, Format),
-    {{returnvalue, Value}, Rest}.
+    {ok, {returnvalue, Value}, Rest}.
 
 decode_rowformat_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     <<_ColsNumber:16, TokenRest/binary>> = TokenData,
     RowFormat = decode_data_format(TokenRest, simple, []),
-    {{rowformat, RowFormat}, Rest}.
+    {ok, {rowformat, RowFormat}, Rest}.
 
 decode_rowformat2_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
     <<_ColsNumber:16, TokenRest/binary>> = TokenData,
     RowFormat = decode_data_format(TokenRest, column_extended, []),
-    {{rowformat, RowFormat}, Rest}.
+    {ok, {rowformat, RowFormat}, Rest}.
     
 decode_paramsformat_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     <<_ColsNumber:16, TokenRest/binary>> = TokenData,
     RowFormat = decode_data_format(TokenRest, simple, []),
-    {{paramsformat, RowFormat}, Rest}.
+    {ok, {paramsformat, RowFormat}, Rest}.
 
 decode_paramsformat2_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
     <<_ColsNumber:16, TokenRest/binary>> = TokenData,
     RowFormat = decode_data_format(TokenRest, param_extended, []),
-    {{paramsformat, RowFormat}, Rest}.
+    {ok, {paramsformat, RowFormat}, Rest}.
 
 decode_row_token(TokenData, RowFormat) ->
-    {Rows, Rest} = decode_row(TokenData, RowFormat),
-    {{row, Rows}, Rest}.
+    {ok, Rows, Rest} = decode_row(TokenData, RowFormat),
+    {ok, {row, Rows}, Rest}.
 
 decode_params_token(TokenData, ParamsFormat) ->
-    {Rows, Rest} = decode_row(TokenData, ParamsFormat),
-    {{params, Rows}, Rest}.
+    {ok, Rows, Rest} = decode_row(TokenData, ParamsFormat),
+    {ok, {params, Rows}, Rest}.
 
 decode_data_format(<<>>, _EncodingFormat, RowFormat) ->
     lists:reverse(RowFormat);
 decode_data_format(Data, EncodingFormat, RowFormat) ->
-    {ColFormat, Rest} = decode_data_format(Data, EncodingFormat),
+    {ok, ColFormat, Rest} = decode_data_format(Data, EncodingFormat),
     decode_data_format(Rest, EncodingFormat, [ColFormat|RowFormat]).
 
 %% TODO status byte
@@ -290,7 +305,7 @@ decode_data_format(Data, returnvalue) ->
         status      = Status,
         usertype    = UserType
     },
-    {F2, Rest2};
+    {ok, F2, Rest2};
 decode_data_format(Data, simple) ->
     <<ParamNameLen, ParamName:ParamNameLen/binary,
         Status, UserType:32/signed, Rest/binary>> = Data,
@@ -302,7 +317,7 @@ decode_data_format(Data, simple) ->
         usertype    = UserType,
         locale      = LocaleInfo
     },
-    {F2, Rest3};
+    {ok, F2, Rest3};
 decode_data_format(Data, param_extended) ->
     <<ParamNameLen, ParamName:ParamNameLen/binary,
         Status:32, UserType:32/signed, Rest/binary>> = Data,
@@ -314,7 +329,7 @@ decode_data_format(Data, param_extended) ->
         usertype    = UserType,
         locale      = LocaleInfo
     },
-    {F2, Rest3};
+    {ok, F2, Rest3};
 decode_data_format(Data, column_extended) ->
     <<LabelNameLen, LabelName:LabelNameLen/binary,
         CatalogNameLen, CatalogName:CatalogNameLen/binary,
@@ -334,7 +349,7 @@ decode_data_format(Data, column_extended) ->
         usertype    = UserType,
         locale      = LocaleInfo
     },
-    {F2, Rest3}.
+    {ok, F2, Rest3}.
 
 decode_datatype_format(<<DataType, Rest/binary>>) ->
     if
@@ -378,7 +393,7 @@ decode_row(Data, [ValueFormat|RestRowFormat], Values) ->
     {Value, RestData} = decode_data(Data, ValueFormat),
     decode_row(RestData, RestRowFormat, [Value|Values]);
 decode_row(Data, [], Values) ->
-    {lists:reverse(Values), Data}.
+    {ok, lists:reverse(Values), Data}.
 
 get_data_length(?TDS_TYPE_UINT2) -> 2;
 get_data_length(?TDS_TYPE_UINT4) -> 4;
