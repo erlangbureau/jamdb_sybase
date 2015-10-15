@@ -49,62 +49,44 @@ init(Opts) ->
     {ok, State}.
 
 %% Error types: socket, remote, local
-handle_call({sql_query, Query, Timeout}, _From, State) ->
+handle_call({sql_query, Query, Timeout} = Operation, _From, State) ->
     try jamdb_sybase_conn:sql_query(State, Query, Timeout) of
         {ok, Result, State2} -> 
             {reply, {ok, Result}, State2};
-        {error, socket, Reason, State2} ->
-            {ok, State3} = jamdb_sybase_conn:reconnect(State2), %% TODO reconnect on req
-            {reply, {error, socket, Reason}, State3};
         {error, Type, Reason, State2} ->
-            {reply, {error, Type, Reason}, State2}
+            {reply, {error, {Type, Reason}}, State2}
     catch
-        _Class:Reason ->
+        Class:Reason ->
             Stacktrace = erlang:get_stacktrace(),
-            ErrDesc = [
-                {reason, Reason},
-                {stacktrace, Stacktrace}
-            ],
-            {ok, State2} = jamdb_sybase_conn:reconnect(State), %% TODO reconnect on req
-            {reply, {error, local, {unknown_error, ErrDesc}}, State2}
+            ErrDesc = get_error_desc(Operation, Class, Reason, Stacktrace),
+            {ok, State2} = jamdb_sybase_conn:reconnect(State),
+            {reply, {error, {local, ErrDesc}}, State2}
     end;
-handle_call({prepare, Stmt, Query}, _From, State) ->
+handle_call({prepare, Stmt, Query} = Operation, _From, State) ->
     try jamdb_sybase_conn:prepare(State, Stmt, Query) of
         {ok, State2} -> 
             {reply, ok, State2};
-        {error, socket, Reason, State2} ->
-            {ok, State3} = jamdb_sybase_conn:reconnect(State2), %% TODO reconnect on req
-            {reply, {error, socket, Reason}, State3};
         {error, Type, Reason, State2} ->
-            {reply, {error, Type, Reason}, State2}
+            {reply, {error, {Type, Reason}}, State2}
     catch
-        _Class:Reason ->
+        Class:Reason ->
             Stacktrace = erlang:get_stacktrace(),
-            ErrDesc = [
-                {reason, Reason},
-                {stacktrace, Stacktrace}
-            ],
-            {ok, State2} = jamdb_sybase_conn:reconnect(State), %% TODO reconnect on req
-            {reply, {error, local, {unknown_error, ErrDesc}}, State2}
+            ErrDesc = get_error_desc(Operation, Class, Reason, Stacktrace),
+            {ok, State2} = jamdb_sybase_conn:reconnect(State),
+            {reply, {error, {local, ErrDesc}}, State2}
     end;
-handle_call({execute, Stmt, Args, Timeout}, _From, State) ->
+handle_call({execute, Stmt, Args, Timeout} = Operation, _From, State) ->
     try jamdb_sybase_conn:execute(State, Stmt, Args, Timeout) of
         {ok, Result, State2} -> 
             {reply, {ok, Result}, State2};
-        {error, socket, Reason, State2} ->
-            {ok, State3} = jamdb_sybase_conn:reconnect(State2), %% TODO reconnect on req
-            {reply, {error, socket, Reason}, State3};
         {error, Type, Reason, State2} ->
-            {reply, {error, Type, Reason}, State2}
+            {reply, {error, {Type, Reason}}, State2}
     catch
-        _Class:Reason ->
+        Class:Reason ->
             Stacktrace = erlang:get_stacktrace(),
-            ErrDesc = [
-                {reason, Reason},
-                {stacktrace, Stacktrace}
-            ],
-            {ok, State2} = jamdb_sybase_conn:reconnect(State), %% TODO reconnect on req
-            {reply, {error, local, {unknown_error, ErrDesc}}, State2}
+            ErrDesc = get_error_desc(Operation, Class, Reason, Stacktrace),
+            {ok, State2} = jamdb_sybase_conn:reconnect(State),
+            {reply, {error, {local, ErrDesc}}, State2}
     end;
 handle_call(stop, _From, State) ->
     {ok, _InitOpts} = jamdb_sybase_conn:disconnect(State),
@@ -127,3 +109,11 @@ code_change(_OldVsn, State, _Extra) ->
 %% internal
 call_infinity(Pid, Msg) ->
     gen_server:call(Pid, Msg, infinity).
+
+get_error_desc(Operation, Class, Reason, Stacktrace) ->
+    [
+        {operation, Operation},
+        {exception_class, Class},
+        {exception_reason, Reason},
+        {stacktrace, Stacktrace}
+    ].

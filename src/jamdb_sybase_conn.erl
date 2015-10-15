@@ -124,6 +124,11 @@ sql_query(State = #sybclient{conn_state = connected}, Query, Timeout) ->
     case send_query_req(State, Query) of
         {ok, State2}    -> handle_resp(State2, Timeout);
         Error           -> Error
+    end;
+sql_query(State, Query, Timeout) ->
+    case reconnect(State) of
+        {ok, State2}    -> sql_query(State2, Query, Timeout);
+        Error           -> Error
     end.
 
 prepare(State = #sybclient{conn_state = connected}, Stmt, Query) ->
@@ -131,10 +136,12 @@ prepare(State = #sybclient{conn_state = connected}, Stmt, Query) ->
     case send_prepare_req(State, Stmt, Query) of
         {ok, State2}    -> handle_empty_resp(State2, ?DEF_TIMEOUT);
         Error           -> Error
+    end;
+prepare(State, Stmt, Query) ->
+    case reconnect(State) of
+        {ok, State2}    -> prepare(State2, Stmt, Query);
+        Error           -> Error
     end.
-
-%unprepare(State, _Stmt) ->
-%    {ok, State}.
 
 execute(State, Stmt, Args) ->
     execute(State, Stmt, Args, ?DEF_TIMEOUT).
@@ -147,6 +154,11 @@ execute(State = #sybclient{conn_state = connected}, Stmt, Args, Timeout) ->
     end,
     case send_execute_req(State, [HasArgs], Stmt) of
         {ok, State2}    -> handle_resp(State2, Timeout);
+        Error           -> Error
+    end;
+execute(State, Stmt, Args, Timeout) ->
+    case reconnect(State) of
+        {ok, State2}    -> execute(State2, Stmt, Args, Timeout);
         Error           -> Error
     end.
 

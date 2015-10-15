@@ -1,6 +1,6 @@
 {application, jamdb_sybase, [
     {description, "Erlang driver for SAP Sybase ASE"},
-    {vsn, "0.6.0"},
+    {vsn, "0.7.0"},
     {id, "git"},
     {modules, []},
     {registered, []},
