@@ -1,28 +1,31 @@
 -record(format, {
-    format :: fixed | variable | long | text | decimal,
-    usertype,
-    tdstype,
+    column_name = <<>>,
     status,
+    usertype,
+    usertype_group,
+    datatype,
+    datatype_group :: fixed | variable | long | text | decimal,
+    datatype_max_len,
+    datatype_precision,
+    datatype_scale,
+    datatype_locale,
+    datatype_class_id,
+    datatype_name,
     db_name,
     owner_name,
     table_name,
-    label_name  = <<>>,
-    column_name = <<>>,
-    obj_name,
-    class_id,
-    scale,
-    locale
+    label_name  = <<>>
 }).
 
 -record(message, {
-        msg_number, 
-        msg_state, 
-        class, 
-        sql_state,
-        status, 
-        transaction_state, 
-        msg_body, 
-        server_name, 
-        procedure_name, 
-        line_number
+    msg_number, 
+    msg_state, 
+    class, 
+    sql_state,
+    status, 
+    transaction_state, 
+    msg_body, 
+    server_name, 
+    procedure_name, 
+    line_number
 }).

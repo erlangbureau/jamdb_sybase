@@ -2,20 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 
-%% Common Test callbacks
--export([all/0]).
--export([init_per_suite/1, end_per_suite/1]).
--export([init_per_testcase/2, end_per_testcase/2]).
-
-%% test cases
--export([return_ok/1]).
--export([return_error/1]).
--export([no_return/1]).
--export([one_result_set/1]).
--export([multi_result_set/1]).
--export([with_input_params/1]).
--export([with_output_params/1]).
--export([with_input_and_output_params/1]).
+-compile(export_all).
 
 -define(ConnOpts, [
     {host, "jamdb-sybase-dev.erlangbureau.dp.ua"},

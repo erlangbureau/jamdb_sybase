@@ -1,25 +1,52 @@
 -module(jamdb_sybase_tds_encoder).
 
 %% API
--export([encode_packet/3]).
--export([encode_login_record/1]).
--export([encode_token/1]).
+-export([encode_packets/3]).
+-export([encode_tokens/1]).
 
 -include("TDS_5_0.hrl").
 -include("jamdb_sybase.hrl").
 
 %% API
-encode_packet(Type, PacketSize, Data) ->
-    DataSize = PacketSize - 8,
-    case Data of
-        <<PacketData:DataSize/binary, Rest/binary>> ->
-            {<<Type:8, 0:8, PacketSize:16, 0:32, PacketData/binary>>, Rest};
-        _ ->
-            LastPacketSize = byte_size(Data) + 8,
-            {<<Type:8, 1:8, LastPacketSize:16, 0:32, Data/binary>>, <<>>}
+encode_packets(TokenStream, PacketType, PktSize) ->
+    DataSize = PktSize - 8,
+    PktType = case PacketType of
+        query -> ?TDS_PKT_QUERY;
+        login -> ?TDS_PKT_LOGIN
+    end,
+    encode_packets(TokenStream, PktType, PktSize, DataSize, <<>>).
+
+encode_packets(InStream, PktType, PktSize, DataSize, OutStream) ->
+    case InStream of
+        <<PktData:DataSize/binary, InStream2/binary>> ->
+            OutStream2 = <<OutStream/binary, 
+                PktType:8, 0:8, PktSize:16, 0:32, PktData/binary>>,
+            encode_packets(InStream2, PktType, PktSize, DataSize, OutStream2);
+        PktData ->
+            LastPktSize = byte_size(PktData) + 8,
+            <<OutStream/binary, 
+                PktType:8, 1:8, LastPktSize:16, 0:32, PktData/binary>>
     end.
 
-encode_login_record(EnvOpts) ->
+encode_tokens(TokenList) ->
+    encode_tokens(TokenList, {}, <<>>).
+
+encode_tokens([Token|TokensList], Format, TokenStream) ->
+    Data = case element(1, Token) of
+        language ->     encode_language_token(Token);
+        dynamic ->      encode_dynamic_token(Token);
+        paramsformat -> encode_paramsformat_token(Token);
+        params ->       encode_params_token(Token, Format);
+        dbrpc ->        encode_dbrpc_token(Token);
+        login ->        encode_login_record(Token);
+        logout ->       encode_logout_token(Token)
+    end,
+    encode_tokens(TokensList, Format, <<TokenStream/binary, Data/binary>>);
+encode_tokens([], _Format, TokenStream) ->
+    TokenStream.
+
+%% internal
+encode_login_record({login, EnvOpts}) ->
     {ok, UserHost}  = inet:gethostname(),
     UserPID         = os:getpid(),
     User            = proplists:get_value(user, EnvOpts),
@@ -65,25 +92,13 @@ encode_login_record(EnvOpts) ->
         (encode_token_capability())/binary
     >>.
 
-encode_token(Token) ->
-    case Token of
-        {language, Query} ->
-            encode_language_token(Query);
-        {dynamic, Type, Status, Id, Stmt} ->
-            encode_dynamic_token(Type, Status, Id, Stmt);
-        {dbrpc, RpcName, Options} ->
-            encode_dbrpc_token(RpcName, Options);
-        {logout, Opts} ->
-            encode_logout_token(Opts)
-    end.
-
-encode_logout_token(_Opts) ->
+encode_logout_token({logout, _Opts}) ->
     <<
         ?TDS_TOKEN_LOGOUT, 
         0   %% Options: no options
     >>.
 
-encode_language_token(Query) ->
+encode_language_token({language, Query}) ->
     <<
         ?TDS_TOKEN_LANGUAGE, 
         (byte_size(Query)+1):32,    %% token length
@@ -99,15 +114,19 @@ encode_language_token(Query) ->
 %%   a client library will prepend “create proc” in the Stmt field of the TDS_DYN_PREPARE data stream. 
 %% If TDS_PROTO_DYNPROC (CS_PROTO_DYNPROC) capability is disabled (0),
 %%   a client library will just send the Stmt information un-modified.
-encode_dynamic_token(Type, Status, Id, Stmt) ->
+encode_dynamic_token({dynamic, Type, Status, Id, Stmt}) ->
     StmtLen = byte_size(Stmt),
     IdLen = byte_size(Id),
+    BinType = case Type of
+        prepare -> ?TDS_DYN_PREPARE;
+        execute -> ?TDS_DYN_EXEC
+    end,
     case (StmtLen < 32765 - IdLen) of
         true ->
             <<
                 ?TDS_TOKEN_DYNAMIC,
                 (5 + IdLen + StmtLen):16,   %% Token Length
-                Type:8,                     %% type of dynamic operation
+                BinType:8,                  %% type of dynamic operation
                 (encode_bit_mask(Status)):8,%% status
                 IdLen:8,                    %% Length of statement id
                 Id:IdLen/binary,            %% statement id
@@ -118,7 +137,7 @@ encode_dynamic_token(Type, Status, Id, Stmt) ->
             <<
                 ?TDS_TOKEN_DYNAMIC2,
                 (7 + IdLen + StmtLen):32,   %% Token Length
-                Type:8,                     %% type of dynamic operation
+                BinType:8,                  %% type of dynamic operation
                 (encode_bit_mask(Status)):8,%% status
                 IdLen:8,                    %% Length of statement id
                 Id:IdLen/binary,            %% statement id
@@ -126,6 +145,76 @@ encode_dynamic_token(Type, Status, Id, Stmt) ->
                 Stmt:StmtLen/binary         %% statement
             >>
     end.
+
+encode_paramsformat_token({paramsformat, ParamsAmount, ParamsFormat}) ->
+    EncodedParamsFormat = encode_paramsformat(ParamsFormat),
+    EncodedParamsFormatLen = byte_size(EncodedParamsFormat),
+    <<
+        ?TDS_TOKEN_PARAMFMT, 
+        (EncodedParamsFormatLen + 1):16,
+        ParamsAmount:16,
+        EncodedParamsFormat/binary
+    >>.
+
+%format, {
+%    format :: fixed | variable | long | text | decimal,
+%    usertype,
+%    tdstype,
+%    status,
+%    db_name,
+%    owner_name,
+%    table_name,
+%    label_name  = <<>>,
+%    column_name = <<>>,
+%    obj_name,
+%    class_id,
+%    scale,
+%    locale
+%}
+
+encode_paramsformat(List) ->
+    encode_paramsformat(List, []).
+
+encode_paramsformat([#format{
+        column_name=ParamName, 
+        status=Status, 
+        usertype=UserType,
+        datatype_locale=LocaleInfo} = Format|Rest], Encoded) ->
+    ParamNameLen = byte_size(ParamName),
+    LocaleLen = byte_size(LocaleInfo),
+    EncodedParam = <<
+        ParamNameLen:8,
+        ParamName:ParamNameLen,
+        Status:8,
+        UserType:32/signed,
+        (encode_dataformat(Format))/binary,
+        LocaleLen,
+        LocaleInfo:LocaleLen
+    >>,
+    encode_paramsformat(Rest, <<Encoded/binary, EncodedParam/binary>>);
+encode_paramsformat([], Token) ->
+    Token.
+
+encode_dataformat(#format{datatype_group=fixed, datatype=DataType}) ->
+    <<DataType>>.
+
+encode_params_token({params, Params}, Format) ->
+    encode_params(Params, Format, <<>>).
+
+encode_params([Param|Params], #format{datatype=DataType, usertype=UserType} = Format,
+        EncodedParams) ->
+    EncodedParam = encode_datatype(encode_usertype(Param, UserType), DataType),
+    encode_params(Params, Format, <<EncodedParams/binary, EncodedParam/binary>>);
+encode_params([], _Format, EncodedParams) ->
+    EncodedParams.
+
+encode_datatype(Value, DataType) ->
+    io:format("DataType:~p~n", [DataType]),
+    Value.
+
+encode_usertype(Value, UserType) ->
+    io:format("UserType:~p~n", [UserType]),
+    Value.
 
 %-define(ENCODE_RPC_PARAM(ParamsList), <<
 %    (encode_data(varchar, ParamName, 1)),   %% ParamName
@@ -145,7 +234,7 @@ encode_dynamic_token(Type, Status, Id, Stmt) ->
 %% The TDS_DBRPC token will be used by clients if the TDS_REQ_PARAM capability bit is true
 %% The TDS_DBRPC2 token will be used by clients only if the TDS_REQ_DBRPC2 capability bit is true.
 %% Return parameters will be returned to a client using the TDS_PARAMFMT/PARAMS tokens if the TDS_RES_NOPARAM capability bit is false.
-encode_dbrpc_token(RpcName, Options) ->
+encode_dbrpc_token({dbrpc, RpcName, Options}) ->
     RpcNameLen = byte_size(RpcName),
     case RpcNameLen < 255 of
         true ->
@@ -199,7 +288,6 @@ encode_dbrpc_token(RpcName, Options) ->
 %>>).
 
 
-%% internal
 encode_lrempw(Password) ->
     <<
     0:8,    %% ServerName length: zero mean universal password
@@ -294,7 +382,7 @@ encode_token_capability() ->
         1:1,    %% 49:Support NULL floats (CS_DATA_FLTN)
         1:1,    %% 48:Pre-pend “create proc” to dynamic prepare statements (CS_PROTO_DYNPROC)
     
-        1:1,    %% 47:Use DESCIN/DESCOUT dynamic protocol (CS_PROTO_DYNAMIC)
+        0:1,    %% 47:Use DESCIN/DESCOUT dynamic protocol (CS_PROTO_DYNAMIC)
         0:1,    %% 46:Support boundary security data types (CS_DATA_BOUNDARY)
         0:1,    %% 45:Support sensitivity security data types (CS_DATA_SENSITIVITY)
         0:1,    %% 44:Use new event notification protocol (CS_REQ_URGNOTIF)

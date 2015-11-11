@@ -6,7 +6,7 @@
 -export([stop/1]).
 -export([sql_query/2, sql_query/3]).
 -export([prepare/3]).
--export([execute/3, execute/4]).
+-export([execute/2, execute/3, execute/4]).
 
 %% gen_server callbacks
 -export([init/1, terminate/2]).
@@ -14,6 +14,7 @@
 -export([code_change/3]).
 
 -include("jamdb_sybase_defaults.hrl").
+-include("jamdb_sybase.hrl").
 
 %% API
 -spec start_link(jamdb_sybase_conn:options()) -> {ok, pid()} | {error, term()}.
@@ -37,6 +38,9 @@ sql_query(Pid, Query, Timeout) ->
 prepare(Pid, Stmt, Query) ->
     call_infinity(Pid, {prepare, Stmt, Query}).
 
+execute(Pid, Stmt) ->
+    execute(Pid, Stmt, []).
+
 execute(Pid, Stmt, Args) ->
     execute(Pid, Stmt, Args, ?DEF_TIMEOUT).
 
@@ -53,40 +57,43 @@ handle_call({sql_query, Query, Timeout} = Operation, _From, State) ->
     try jamdb_sybase_conn:sql_query(State, Query, Timeout) of
         {ok, Result, State2} -> 
             {reply, {ok, Result}, State2};
-        {error, Type, Reason, State2} ->
-            {reply, {error, {Type, Reason}}, State2}
+        {error, Type, Message, State2} ->
+            {reply, {error, format_error(Type, Message)}, State2}
     catch
         Class:Reason ->
             Stacktrace = erlang:get_stacktrace(),
-            ErrDesc = get_error_desc(Operation, Class, Reason, Stacktrace),
+            Err = {Operation, State, Class, Reason, Stacktrace},
+            ErrDesc = format_error(exception, Err),
             {ok, State2} = jamdb_sybase_conn:reconnect(State),
-            {reply, {error, {local, ErrDesc}}, State2}
+            {reply, {error, ErrDesc}, State2}
     end;
 handle_call({prepare, Stmt, Query} = Operation, _From, State) ->
     try jamdb_sybase_conn:prepare(State, Stmt, Query) of
         {ok, State2} -> 
             {reply, ok, State2};
-        {error, Type, Reason, State2} ->
-            {reply, {error, {Type, Reason}}, State2}
+        {error, Type, Message, State2} ->
+            {reply, {error, format_error(Type, Message)}, State2}
     catch
         Class:Reason ->
             Stacktrace = erlang:get_stacktrace(),
-            ErrDesc = get_error_desc(Operation, Class, Reason, Stacktrace),
+            Err = {Operation, State, Class, Reason, Stacktrace},
+            ErrDesc = format_error(exception, Err),
             {ok, State2} = jamdb_sybase_conn:reconnect(State),
-            {reply, {error, {local, ErrDesc}}, State2}
+            {reply, {error, ErrDesc}, State2}
     end;
 handle_call({execute, Stmt, Args, Timeout} = Operation, _From, State) ->
     try jamdb_sybase_conn:execute(State, Stmt, Args, Timeout) of
         {ok, Result, State2} -> 
             {reply, {ok, Result}, State2};
-        {error, Type, Reason, State2} ->
-            {reply, {error, {Type, Reason}}, State2}
+        {error, Type, Message, State2} ->
+            {reply, {error, format_error(Type, Message)}, State2}
     catch
         Class:Reason ->
             Stacktrace = erlang:get_stacktrace(),
-            ErrDesc = get_error_desc(Operation, Class, Reason, Stacktrace),
+            Err = {Operation, State, Class, Reason, Stacktrace},
+            ErrDesc = format_error(exception, Err),
             {ok, State2} = jamdb_sybase_conn:reconnect(State),
-            {reply, {error, {local, ErrDesc}}, State2}
+            {reply, {error, ErrDesc}, State2}
     end;
 handle_call(stop, _From, State) ->
     {ok, _InitOpts} = jamdb_sybase_conn:disconnect(State),
@@ -110,10 +117,26 @@ code_change(_OldVsn, State, _Extra) ->
 call_infinity(Pid, Msg) ->
     gen_server:call(Pid, Msg, infinity).
 
-get_error_desc(Operation, Class, Reason, Stacktrace) ->
-    [
-        {operation, Operation},
-        {exception_class, Class},
-        {exception_reason, Reason},
-        {stacktrace, Stacktrace}
-    ].
+format_error(remote, Message) ->
+    {remote, [
+        {msg_number,        Message#message.msg_number},
+        {msg_state,         Message#message.msg_state},
+        {class,             Message#message.class},
+        {sql_state,         Message#message.sql_state},
+        {status,            Message#message.status},
+        {transaction_state, Message#message.transaction_state},
+        {msg_body,          Message#message.msg_body},
+        {server_name,       Message#message.server_name},
+        {procedure_name,    Message#message.procedure_name},
+        {line_number,       Message#message.line_number}
+    ]};
+format_error(exception, {Operation, State, Class, Reason, Stacktrace}) ->
+    {local, [
+        {operation,         Operation},
+        {state,             State},
+        {exception_class,   Class},
+        {exception_reason,  Reason},
+        {stacktrace,        Stacktrace}
+    ]};
+format_error(Type, Msg) ->
+    {Type, Msg}.

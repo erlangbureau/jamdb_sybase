@@ -2,75 +2,7 @@
 
 -include_lib("common_test/include/ct.hrl").
 
-%% Common Test callbacks
--export([all/0]).
--export([init_per_suite/1, end_per_suite/1]).
--export([init_per_testcase/2, end_per_testcase/2]).
-
-%% !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-%% For successful tests with widetable future 
-%%   you server must be deployed with "Column Size Page" 8k or bigger
-%% !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-%% test cases
--export([unsigned_bigint/1]).
--export([signed_bigint/1]).
--export([unsigned_nullable_bigint/1]).
--export([signed_nullable_bigint/1]).
--export([unsigned_int/1]).
--export([signed_int/1]).
--export([unsigned_nullable_int/1]).
--export([signed_nullable_int/1]).
--export([unsigned_smallint/1]).
--export([signed_smallint/1]).
--export([unsigned_nullable_smallint/1]).
--export([signed_nullable_smallint/1]).
--export([unsigned_tinyint/1]).
--export([unsigned_nullable_tinyint/1]).
--export([float/1]).
--export([nullable_float/1]).
--export([real/1]).
--export([nullable_real/1]).
--export([numeric/1]).
--export([nullable_numeric/1]).
--export([char/1]).
--export([nullable_char/1]).
--export([nchar/1]).
--export([nulable_nchar/1]).
--export([varchar/1]).
--export([nulable_varchar/1]).
--export([nvarchar/1]).
--export([nulable_nvarchar/1]).
--export([binary/1]).
--export([nulable_binary/1]).
--export([varbinary/1]).
--export([nulable_varbinary/1]).
--export([widetable_char/1]).
--export([widetable_nullable_char/1]).
--export([widetable_nchar/1]).
--export([widetable_nullable_nchar/1]).
--export([widetable_varchar/1]).
--export([widetable_nulable_varchar/1]).
--export([widetable_nvarchar/1]).
--export([widetable_nulable_nvarchar/1]).
--export([widetable_binary/1]).
--export([widetable_nulable_binary/1]).
--export([widetable_varbinary/1]).
--export([widetable_nulable_varbinary/1]).
--export([text/1]).
--export([nulable_text/1]).
--export([datetime/1]).
--export([nulable_datetime/1]).
--export([smalldatetime/1]).
--export([nulable_smalldatetime/1]).
--export([date/1]).
--export([nulable_date/1]).
--export([time/1]).
--export([nulable_time/1]).
-%-export([money/1]).
-%-export([nulable_money/1]).
-%-export([smallmoney/1]).
-%-export([nulable_smallmoney/1]).
+-compile(export_all).
 
 -define(ConnOpts, [
     {host, "jamdb-sybase-dev.erlangbureau.dp.ua"},
@@ -101,8 +33,10 @@ all() ->
         nullable_float,
         real,
         nullable_real,
-        numeric,
-        nullable_numeric,
+        integer_numeric,
+        integer_nullable_numeric,
+        fractional_numeric,
+        fractional_nullable_numeric,
         char,
         nullable_char,
         nchar,
@@ -389,33 +323,67 @@ nullable_real(Config) ->
     ],
     run_testcases(ConnRef, Table, Key, TestCases).
 
-numeric(Config) ->
+integer_numeric(Config) ->
     ConnRef = ?config(conn_ref, Config),
-    Table = numeric,
-    Key = <<"NUMERIC">>,
+    Table = integer_numeric,
+    Key = <<"I_NUMERIC">>,
     TestCases = [
         %% source value, result value
         %% case 1
-        { {numeric, "999999999999999999999999999999999999.99"}, {numeric, 99999999999999999999999999999999999999, 2} },
+        { {decimal, "1"}, 1},
         %% case 2
-        {{numeric, "-999999999999999999999999999999999999.99"}, {numeric, -99999999999999999999999999999999999999, 2} }
+        { {decimal, "999999999999999999999999999999999999"}, 999999999999999999999999999999999999},
+        %% case 3
+        {{decimal, "-999999999999999999999999999999999999"}, -999999999999999999999999999999999999}
     ],
     run_testcases(ConnRef, Table, Key, TestCases).
 
-nullable_numeric(Config) ->
+integer_nullable_numeric(Config) ->
     ConnRef = ?config(conn_ref, Config),
-    Table = nullable_numeric,
-    Key = <<"N_NUMERIC">>,
+    Table = integer_nullable_numeric,
+    Key = <<"I_N_NUMERIC">>,
     TestCases = [
         %% source value, result value
-        %% case 0 bug????
-        %{ {numeric, "99999999999999999999999999999999999999"}, {numeric, 9999999999999999999999999999999999999, 0}},
         %% case 1
         {null, null},
         %% case 2
-        { {numeric, "999999999999999999999999999999999999.99"}, {numeric, 99999999999999999999999999999999999999, 2} },
+        { {decimal, "1"}, 1},
         %% case 3
-        {{numeric, "-999999999999999999999999999999999999.99"}, {numeric, -99999999999999999999999999999999999999, 2} }
+        { {decimal, "999999999999999999999999999999999999"}, 999999999999999999999999999999999999},
+        %% case 4
+        {{decimal, "-999999999999999999999999999999999999"}, -999999999999999999999999999999999999}
+    ],
+    run_testcases(ConnRef, Table, Key, TestCases).
+
+fractional_numeric(Config) ->
+    ConnRef = ?config(conn_ref, Config),
+    Table = fractional_numeric,
+    Key = <<"F_NUMERIC">>,
+    TestCases = [
+        %% source value, result value
+        %% case 1
+        { {decimal, "1"}, {decimal, 100, 2}},
+        %% case 2
+        { {decimal, "999999999999999999999999999999999999.99"}, {decimal, 99999999999999999999999999999999999999, 2} },
+        %% case 3
+        {{decimal, "-999999999999999999999999999999999999.99"}, {decimal, -99999999999999999999999999999999999999, 2} }
+    ],
+    run_testcases(ConnRef, Table, Key, TestCases).
+
+fractional_nullable_numeric(Config) ->
+    ConnRef = ?config(conn_ref, Config),
+    Table = fractional_nullable_numeric,
+    Key = <<"F_N_NUMERIC">>,
+    TestCases = [
+        %% source value, result value
+        %% case 1
+        {null, null},
+        %% case 2
+        { {decimal, "1"}, {decimal, 100, 2}},
+        %% case 3
+        { {decimal, "999999999999999999999999999999999999.99"}, {decimal, 99999999999999999999999999999999999999, 2} },
+        %% case 4
+        {{decimal, "-999999999999999999999999999999999999.99"}, {decimal, -99999999999999999999999999999999999999, 2} }
     ],
     run_testcases(ConnRef, Table, Key, TestCases).
 
@@ -973,10 +941,14 @@ table_desc(real) ->
     "REAL real not null";
 table_desc(nullable_real) ->
     "N_REAL real null";
-table_desc(numeric) ->
-    "NUMERIC numeric(38,2)";
-table_desc(nullable_numeric) ->
-    "N_NUMERIC numeric(38,2) null";
+table_desc(integer_numeric) ->
+    "I_NUMERIC numeric(38,0)";
+table_desc(integer_nullable_numeric) ->
+    "I_N_NUMERIC numeric(38,0) null";
+table_desc(fractional_numeric) ->
+    "F_NUMERIC numeric(38,2)";
+table_desc(fractional_nullable_numeric) ->
+    "F_N_NUMERIC numeric(38,2) null";
 table_desc(char) ->
     "CHAR char(10) not null";
 table_desc(nullable_char) ->
