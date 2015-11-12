@@ -100,7 +100,7 @@ disconnect(#conn{state=connected, socket=Socket, env=Env}, 0) ->
 disconnect(Conn = #conn{state=connected, socket=Socket, env=Env,
         packet_size=PktSize}, Timeout) ->
     TokenStream = ?ENCODER:encode_tokens([{logout, []}]),
-    DataStream = ?ENCODER:encode_packets(TokenStream, query, PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
     try send(Socket, DataStream) of
         ok -> handle_empty_resp(Conn, Timeout);
         {error, _Reason} -> ok
@@ -125,7 +125,7 @@ sql_query(Conn = #conn{state=connected, socket=Socket,
         packet_size=PktSize}, Query, Timeout) ->
     BQuery = unicode:characters_to_binary(Query),
     TokenStream = ?ENCODER:encode_tokens([{language, BQuery}]),
-    DataStream = ?ENCODER:encode_packets(TokenStream, query, PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
     case send(Socket, DataStream) of
         ok              -> handle_query_resp(Conn, Timeout);
         {error, Reason} -> handle_error(socket, Reason, Conn)
@@ -143,7 +143,7 @@ prepare(Conn = #conn{state=connected, socket=Socket,
     BQuery2 = <<"create proc ", BStmtId/binary, " as ", BQuery/binary>>,
     TokenList = [{dynamic, prepare, [], BStmtId, BQuery2}],
     TokenStream = ?ENCODER:encode_tokens(TokenList),
-    DataStream = ?ENCODER:encode_packets(TokenStream, query, PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
     case send(Socket, DataStream) of
         ok              -> handle_prepare_resp(Conn, ?DEF_TIMEOUT);
         {error, Reason} -> handle_error(socket, Reason, Conn)
@@ -172,7 +172,7 @@ execute(Conn = #conn{state=connected, socket=Socket,
             ]
     end,
     TokenStream = ?ENCODER:encode_tokens(TokenList),
-    DataStream = ?ENCODER:encode_packets(TokenStream, query, PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
     case send(Socket, DataStream) of
         ok              -> handle_query_resp(Conn, Timeout);
         {error, Reason} -> handle_error(socket, Reason, Conn)
@@ -206,7 +206,7 @@ system_query(Conn = #conn{state=connected, socket=Socket,
         packet_size=PktSize}, Query, Timeout) ->
     BQuery = unicode:characters_to_binary(Query),
     TokenStream = ?ENCODER:encode_tokens([{language, BQuery}]),
-    DataStream = ?ENCODER:encode_packets(TokenStream, query, PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
     case send(Socket, DataStream) of
         ok              -> handle_empty_resp(Conn, Timeout);
         {error, Reason} -> handle_error(socket, Reason, Conn)

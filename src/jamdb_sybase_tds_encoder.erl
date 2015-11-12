@@ -11,8 +11,8 @@
 encode_packets(TokenStream, PacketType, PktSize) ->
     DataSize = PktSize - 8,
     PktType = case PacketType of
-        query -> ?TDS_PKT_QUERY;
-        login -> ?TDS_PKT_LOGIN
+        'query' -> ?TDS_PKT_QUERY;
+        'login' -> ?TDS_PKT_LOGIN
     end,
     encode_packets(TokenStream, PktType, PktSize, DataSize, <<>>).
 
