@@ -31,18 +31,21 @@ encode_packets(InStream, PktType, PktSize, DataSize, OutStream) ->
 encode_tokens(TokenList) ->
     encode_tokens(TokenList, {}, <<>>).
 
-encode_tokens([Token|TokensList], Format, TokenStream) ->
-    Data = case element(1, Token) of
+encode_tokens([Token|TokensList], Previous, TokenStream) ->
+    TokenType = element(1, Token),
+    Data = case TokenType of
         language ->     encode_language_token(Token);
         dynamic ->      encode_dynamic_token(Token);
         paramsformat -> encode_paramsformat_token(Token);
-        params ->       encode_params_token(Token, Format);
         dbrpc ->        encode_dbrpc_token(Token);
         login ->        encode_login_record(Token);
-        logout ->       encode_logout_token(Token)
+        logout ->       encode_logout_token(Token);
+        params ->
+            {paramsformat, _, Formats} = Previous,
+            encode_params_token(Token, Formats)
     end,
-    encode_tokens(TokensList, Format, <<TokenStream/binary, Data/binary>>);
-encode_tokens([], _Format, TokenStream) ->
+    encode_tokens(TokensList, Token, <<TokenStream/binary, Data/binary>>);
+encode_tokens([], _Previous, TokenStream) ->
     TokenStream.
 
 %% internal
@@ -118,8 +121,9 @@ encode_dynamic_token({dynamic, Type, Status, Id, Stmt}) ->
     StmtLen = byte_size(Stmt),
     IdLen = byte_size(Id),
     BinType = case Type of
-        prepare -> ?TDS_DYN_PREPARE;
-        execute -> ?TDS_DYN_EXEC
+        prepare  -> ?TDS_DYN_PREPARE;
+        execute  -> ?TDS_DYN_EXEC;
+        unprepare -> ?TDS_DYN_DEALLOC
     end,
     case (StmtLen < 32765 - IdLen) of
         true ->
@@ -151,29 +155,13 @@ encode_paramsformat_token({paramsformat, ParamsAmount, ParamsFormat}) ->
     EncodedParamsFormatLen = byte_size(EncodedParamsFormat),
     <<
         ?TDS_TOKEN_PARAMFMT, 
-        (EncodedParamsFormatLen + 1):16,
+        (EncodedParamsFormatLen + 2):16,
         ParamsAmount:16,
         EncodedParamsFormat/binary
     >>.
 
-%format, {
-%    format :: fixed | variable | long | text | decimal,
-%    usertype,
-%    tdstype,
-%    status,
-%    db_name,
-%    owner_name,
-%    table_name,
-%    label_name  = <<>>,
-%    column_name = <<>>,
-%    obj_name,
-%    class_id,
-%    scale,
-%    locale
-%}
-
 encode_paramsformat(List) ->
-    encode_paramsformat(List, []).
+    encode_paramsformat(List, <<>>).
 
 encode_paramsformat([#format{
         column_name=ParamName, 
@@ -183,53 +171,174 @@ encode_paramsformat([#format{
     ParamNameLen = byte_size(ParamName),
     LocaleLen = byte_size(LocaleInfo),
     EncodedParam = <<
-        ParamNameLen:8,
-        ParamName:ParamNameLen,
-        Status:8,
+        ParamNameLen,
+        ParamName:ParamNameLen/binary,
+        Status,
         UserType:32/signed,
         (encode_dataformat(Format))/binary,
         LocaleLen,
-        LocaleInfo:LocaleLen
+        LocaleInfo:LocaleLen/binary
     >>,
     encode_paramsformat(Rest, <<Encoded/binary, EncodedParam/binary>>);
 encode_paramsformat([], Token) ->
     Token.
 
 encode_dataformat(#format{datatype_group=fixed, datatype=DataType}) ->
-    <<DataType>>.
+    <<DataType>>;
+encode_dataformat(#format{datatype_group=variable, datatype=DataType, 
+        datatype_max_len=MaxLen}) ->
+    <<DataType, MaxLen>>;
+encode_dataformat(#format{datatype_group=long, datatype=DataType, 
+        datatype_max_len=MaxLen}) ->
+    <<DataType, MaxLen:32>>;
+encode_dataformat(#format{datatype_group=decimal, datatype=DataType, 
+        datatype_max_len=MaxLen, datatype_precision=Precision, 
+        datatype_scale=Scale}) ->
+    <<DataType, MaxLen, Precision, Scale>>;
+encode_dataformat(#format{datatype_group=clob, datatype=DataType, 
+        datatype_max_len=MaxLen, datatype_name=Name}) ->
+    NLen = byte_size(Name),
+    <<DataType, MaxLen:32, NLen:16, Name:NLen/binary>>.
 
-encode_params_token({params, Params}, Format) ->
-    encode_params(Params, Format, <<>>).
+encode_params_token({params, Params}, Formats) ->
+    <<
+        ?TDS_TOKEN_PARAMS,
+        (encode_params(Params, Formats, <<>>))/binary
+    >>.
 
-encode_params([Param|Params], #format{datatype=DataType, usertype=UserType} = Format,
-        EncodedParams) ->
-    EncodedParam = encode_datatype(encode_usertype(Param, UserType), DataType),
-    encode_params(Params, Format, <<EncodedParams/binary, EncodedParam/binary>>);
-encode_params([], _Format, EncodedParams) ->
+encode_params([Param|Params], [Format|Formats], EncodedParams) ->
+    Encoded = encode_value(Param, Format),
+    encode_params(Params, Formats, <<EncodedParams/binary, Encoded/binary>>);
+encode_params([], _Formats, EncodedParams) ->
     EncodedParams.
 
-encode_datatype(Value, DataType) ->
-    io:format("DataType:~p~n", [DataType]),
-    Value.
+encode_value(null, Format) -> %% TODO is_nullable ?
+    io:format("Format:~p~n", [Format]),
+    <<0>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_INTN, datatype_max_len=Len}) ->
+    case Len of
+        1 -> <<1, Value:1/unsigned-unit:8>>;
+        _ -> <<Len, Value:Len/signed-unit:8>>
+    end;
+encode_value(Value, #format{datatype=?TDS_TYPE_INT1}) ->
+    <<Value:8/unsigned>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_INT2}) ->
+    <<Value:16/signed>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_INT4}) ->
+    <<Value:32/signed>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_INT8}) ->
+    <<Value:64/signed>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_UINTN, datatype_max_len=Len}) ->
+    <<Len, Value:Len/unsigned-unit:8>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_UINT2}) ->
+    <<Value:16/unsigned>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_UINT4}) ->
+    <<Value:32/unsigned>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_UINT8}) ->
+    <<Value:64/unsigned>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_NUMN, datatype_max_len=Len}) ->
+    encode_decimal(Value, Len);
+encode_value(Value, #format{datatype=?TDS_TYPE_DECN, datatype_max_len=Len}) ->
+    encode_decimal(Value, Len);
+encode_value(Value, #format{datatype=?TDS_TYPE_CHAR, datatype_max_len=Len}) ->
+    encode_binary(Value, Len, basic);
+encode_value(Value, #format{datatype=?TDS_TYPE_VARCHAR, datatype_max_len=Len}) ->
+    encode_binary(Value, Len, basic);
+encode_value(Value, #format{datatype=?TDS_TYPE_BINARY, datatype_max_len=Len}) ->
+    encode_binary(Value, Len, basic);
+encode_value(Value, #format{datatype=?TDS_TYPE_VARBINARY, datatype_max_len=Len}) ->
+    encode_binary(Value, Len, basic);
+encode_value(Value, #format{datatype=?TDS_TYPE_FLTN, datatype_max_len=Len}) ->
+    <<Len, Value:Len/float-unit:8>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_FLT4}) ->
+    <<Value:32/float>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_FLT8}) ->
+    <<Value:64/float>>;
+encode_value({Date, Time}, #format{datatype=?TDS_TYPE_SHORTDATE}) ->
+    DaysSince1900 = encode_date(Date),
+    Seconds = encode_time(Time, seconds),
+    <<DaysSince1900:16/unsigned, Seconds:16/unsigned>>;
+encode_value({Date, Time}, #format{datatype=?TDS_TYPE_DATETIME}) ->
+    DaysSince1900 = encode_date(Date),
+    MlSeconds = encode_time(Time, milliseconds),
+    <<DaysSince1900:32/unsigned, MlSeconds:32/unsigned>>;
+encode_value(Date, #format{datatype=?TDS_TYPE_DATE}) ->
+    DaysSince1900 = encode_date(Date),
+    <<DaysSince1900:32/unsigned>>;
+encode_value(Time, #format{datatype=?TDS_TYPE_TIME}) ->
+    MlSeconds = encode_time(Time, milliseconds),
+    <<MlSeconds:32/unsigned>>;
+encode_value({Date, Time}, #format{datatype=?TDS_TYPE_DATETIMEN, 
+        datatype_max_len=Len}) ->
+    case Len of
+        4 ->
+            DaysSince1900 = encode_date(Date),
+            Seconds = encode_time(Time, seconds),
+            <<4, DaysSince1900:16/unsigned, Seconds:16/unsigned>>;
+        8 ->
+            DaysSince1900 = encode_date(Date),
+            MlSeconds = encode_time(Time, milliseconds),
+            <<8, DaysSince1900:32/unsigned, MlSeconds:32/unsigned>>
+    end;
+encode_value(Date, #format{datatype=?TDS_TYPE_DATEN, datatype_max_len=Len}) ->
+    DaysSince1900 = encode_date(Date),
+    <<Len, DaysSince1900:Len/unsigned-unit:8>>;
+encode_value(Time, #format{datatype=?TDS_TYPE_TIMEN, datatype_max_len=Len}) ->
+    MlSeconds = encode_time(Time, milliseconds),
+    <<Len, MlSeconds:Len/unsigned-unit:8>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_MONEYN, datatype_max_len=Len}) ->
+    <<Len, Value:Len/float-unit:8>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_SHORTMONEY}) ->
+    <<Value:32/float>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_MONEY}) ->
+    <<Value:64/float>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_BIT}) ->
+    <<Value:8/unsigned>>;
+encode_value(Value, #format{datatype=?TDS_TYPE_LONGCHAR, 
+        datatype_max_len=Len}) ->
+    encode_binary(Value, Len, long);
+encode_value(Value, #format{datatype=?TDS_TYPE_LONGBINARY, 
+        datatype_max_len=Len}) ->
+    encode_binary(Value, Len, long).
+%encode_value(Value, #format{datatype=?TDS_TYPE_TEXT, datatype_max_len=Len}) ->
+%    <<TPLen, _TxtPtr:TPLen/binary, _TimeStamp:64, Len:32, Value:Len/binary>>.
 
-encode_usertype(Value, UserType) ->
-    io:format("UserType:~p~n", [UserType]),
-    Value.
 
-%-define(ENCODE_RPC_PARAM(ParamsList), <<
-%    (encode_data(varchar, ParamName, 1)),   %% ParamName
-%    0:8,                                    %% Status: status argument is not used
-%    DataType:8,
-%    MaxLen
-%>>).
-%
-%-define(ENCODE_TOKEN_RPC(RpcName, ParamsList), <<
-%    ?TDS_RPC,
-%    TokenLength:16,                     %% Token Length
-%    (encode_data(varchar, RpcName, 1)), %% RPC Name
-%    0:16,                               %% Options: no options
-%    ?ENCODE_RPC_PARAMS(ParamsList)
-%>>).
+encode_decimal(Value, MaxLen) when is_integer(Value) and Value >= 0 ->
+    <<0:8, Value:MaxLen/unsigned-unit:8>>;
+encode_decimal(Value, MaxLen) when is_integer(Value) ->
+    <<1:8, Value:MaxLen/unsigned-unit:8>>.
+    %% TODO fractional
+
+encode_binary(Value, MaxLen, basic) when is_binary(Value) ->
+    Length = byte_size(Value),
+    case Length < MaxLen of
+        true -> <<Length, Value:Length/binary>>;
+        false -> <<MaxLen, Value:MaxLen/binary>>
+    end;
+encode_binary(Value, MaxLen, long) when is_binary(Value) ->
+    Length = byte_size(Value),
+    case Length < MaxLen of
+        true -> <<Length:32, Value:Length/binary>>;
+        false -> <<MaxLen:32, Value:MaxLen/binary>>
+    end;
+encode_binary(Value, MaxLen, Type) when is_list(Value) ->
+    Bin = unicode:characters_to_binary(Value),
+    encode_binary(Bin, MaxLen, Type);
+encode_binary(Value, MaxLen, Type) when is_atom(Value) ->
+    Bin = atom_to_binary(Value, utf8),
+    encode_binary(Bin, MaxLen, Type);
+encode_binary(Value, MaxLen, Type) when is_integer(Value) ->
+    Bin = unicode:characters_to_binary(integer_to_list(Value)),
+    encode_binary(Bin, MaxLen, Type).
+
+encode_date(Date) ->
+    calendar:date_to_gregorian_days(Date) - 693961.
+
+encode_time(Time, seconds) ->
+    calendar:time_to_seconds(Time) div 60;
+encode_time(Time, milliseconds) ->
+    calendar:time_to_seconds(Time) * 300.
 
 %% The TDS_DBRPC token will be used by clients if the TDS_REQ_PARAM capability bit is true
 %% The TDS_DBRPC2 token will be used by clients only if the TDS_REQ_DBRPC2 capability bit is true.
@@ -254,39 +363,6 @@ encode_dbrpc_token({dbrpc, RpcName, Options}) ->
                 (encode_bit_mask(Options)):16   %% Options
             >>
     end.
-
-%-define(ENCODE_TOKEN_PARAMFMT(ParamsNumber, ParamsFormat),
-%begin
-%    ParamsLen = byte_size(ParamsList),
-%    case ParamsLen < 65280 of
-%        true ->
-%            ?ENCODE_TOKEN_PARAMFMT2(ParamsNumber, ParamsLen, ParamsFormat);
-%        false ->
-%            ?ENCODE_TOKEN_PARAMFMT4(ParamsNumber, ParamsLen, ParamsFormat)
-%    end
-%end
-%).
-%
-%-define(ENCODE_TOKEN_PARAMFMT2(ParamsNumber, ParamsLen, ParamsFormat), <<
-%    ?TDS_TOKEN_PARAMFMT,
-%    (1 + ParamsLen):16,                 %% This length specifies the number of bytes remaining in the datastream
-%    ParamsNumber:16                     %% This argument specifies the number of parameters being described
-%    ParamsFormat:ParamsLen/binary
-%>>).
-%
-%-define(ENCODE_TOKEN_PARAMFMT4(ParamsNumber, ParamsLen, ParamsFormat), <<
-%    ?TDS_TOKEN_PARAMFMT2,
-%    (1 + ParamsLen):32,                 %% This length specifies the number of bytes remaining in the datastream
-%    ParamsNumber:16                     %% This argument specifies the number of parameters being described
-%    ParamsFormat:ParamsLen/binary
-%>>).
-%
-%-define(ENCODE_TOKEN_PARAMS(ParamsList, FormatList), <<
-%    ?TDS_TOKEN_PARAMS,
-%    <<(encode_data(SQLType, Value, Size)) || 
-%        {SQLType, Value, Size} <- ParamsList>>/binary
-%>>).
-
 
 encode_lrempw(Password) ->
     <<
@@ -495,8 +571,8 @@ encode_token_capability() ->
         0:1,    %% 36:No Support Serialized Java Objects
         0:1,    %% 35:No support for 8 byte integers
         1:1,    %% 34:Do not strip blank from fixed length character data
-        0:1,    %% 33:No support for TDS_DEBUG token. Use image data instead
-        0:1,    %% 32:No support for the security boundary data type
+        1:1,    %% 33:No support for TDS_DEBUG token. Use image data instead
+        1:1,    %% 32:No support for the security boundary data type
     
         1:1,    %% 31:No support for the security sensitivity data type
         0:1,    %% 30:No support for tokenized bulk copy

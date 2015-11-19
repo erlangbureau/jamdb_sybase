@@ -5,7 +5,7 @@
 -export([start_link/1, start/1]).
 -export([stop/1]).
 -export([sql_query/2, sql_query/3]).
--export([prepare/3]).
+-export([prepare/3, unprepare/2]).
 -export([execute/2, execute/3, execute/4]).
 
 %% gen_server callbacks
@@ -38,6 +38,9 @@ sql_query(Pid, Query, Timeout) ->
 prepare(Pid, Stmt, Query) ->
     call_infinity(Pid, {prepare, Stmt, Query}).
 
+unprepare(Pid, Stmt) ->
+    call_infinity(Pid, {unprepare, Stmt}).
+
 execute(Pid, Stmt) ->
     execute(Pid, Stmt, []).
 
@@ -53,6 +56,20 @@ init(Opts) ->
     {ok, State}.
 
 %% Error types: socket, remote, local
+handle_call({execute, Stmt, Args, Timeout} = Operation, _From, State) ->
+    try jamdb_sybase_conn:execute(State, Stmt, Args, Timeout) of
+        {ok, Result, State2} -> 
+            {reply, {ok, Result}, State2};
+        {error, Type, Message, State2} ->
+            {reply, {error, format_error(Type, Message)}, State2}
+    catch
+        Class:Reason ->
+            Stacktrace = erlang:get_stacktrace(),
+            Err = {Operation, State, Class, Reason, Stacktrace},
+            ErrDesc = format_error(exception, Err),
+            {ok, State2} = jamdb_sybase_conn:reconnect(State),
+            {reply, {error, ErrDesc}, State2}
+    end;
 handle_call({sql_query, Query, Timeout} = Operation, _From, State) ->
     try jamdb_sybase_conn:sql_query(State, Query, Timeout) of
         {ok, Result, State2} -> 
@@ -81,10 +98,10 @@ handle_call({prepare, Stmt, Query} = Operation, _From, State) ->
             {ok, State2} = jamdb_sybase_conn:reconnect(State),
             {reply, {error, ErrDesc}, State2}
     end;
-handle_call({execute, Stmt, Args, Timeout} = Operation, _From, State) ->
-    try jamdb_sybase_conn:execute(State, Stmt, Args, Timeout) of
-        {ok, Result, State2} -> 
-            {reply, {ok, Result}, State2};
+handle_call({unprepare, Stmt} = Operation, _From, State) ->
+    try jamdb_sybase_conn:unprepare(State, Stmt) of
+        {ok, State2} -> 
+            {reply, ok, State2};
         {error, Type, Message, State2} ->
             {reply, {error, format_error(Type, Message)}, State2}
     catch

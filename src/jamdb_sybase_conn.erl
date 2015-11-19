@@ -5,7 +5,7 @@
 -export([reconnect/1]).
 -export([disconnect/1, disconnect/2]).
 -export([sql_query/2, sql_query/3]).
--export([prepare/3]).
+-export([prepare/3, unprepare/2]).
 -export([execute/3, execute/4]).
 
 -include("TDS_5_0.hrl").
@@ -123,7 +123,7 @@ sql_query(Conn, Query) ->
 -spec sql_query(state(), string(), timeout()) -> query_reult().
 sql_query(Conn = #conn{state=connected, socket=Socket,
         packet_size=PktSize}, Query, Timeout) ->
-    BQuery = unicode:characters_to_binary(Query),
+    BQuery = to_binary(Query),
     TokenStream = ?ENCODER:encode_tokens([{language, BQuery}]),
     DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
     case send(Socket, DataStream) of
@@ -138,8 +138,8 @@ sql_query(Conn, Query, Timeout) ->
 
 prepare(Conn = #conn{state=connected, socket=Socket,
         packet_size=PktSize}, StmtId, Query) ->
-    BStmtId = unicode:characters_to_binary(StmtId),
-    BQuery = unicode:characters_to_binary(Query),
+    BStmtId = to_binary(StmtId),
+    BQuery = to_binary(Query),
     BQuery2 = <<"create proc ", BStmtId/binary, " as ", BQuery/binary>>,
     TokenList = [{dynamic, prepare, [], BStmtId, BQuery2}],
     TokenStream = ?ENCODER:encode_tokens(TokenList),
@@ -154,12 +154,28 @@ prepare(Conn, Stmt, Query) ->
         Error       -> Error
     end.
 
+unprepare(Conn = #conn{state=connected, socket=Socket,
+        packet_size=PktSize}, StmtId) ->
+    BStmtId = to_binary(StmtId),
+    TokenList = [{dynamic, unprepare, [], BStmtId, <<>>}],
+    TokenStream = ?ENCODER:encode_tokens(TokenList),
+    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
+    case send(Socket, DataStream) of
+        ok              -> handle_unprepare_resp(Conn, ?DEF_TIMEOUT);
+        {error, Reason} -> handle_error(socket, Reason, Conn)
+    end;
+unprepare(Conn, Stmt) ->
+    case reconnect(Conn) of
+        {ok, Conn2} -> unprepare(Conn2, Stmt);
+        Error       -> Error
+    end.
+
 execute(Conn, Stmt, Args) ->
     execute(Conn, Stmt, Args, ?DEF_TIMEOUT).
 
 execute(Conn = #conn{state=connected, socket=Socket,
         packet_size=PktSize}, StmtId, Args, Timeout) ->
-    BStmtId = unicode:characters_to_binary(StmtId),
+    BStmtId = to_binary(StmtId),
     TokenParamsFmt = proplists:get_value(BStmtId, Conn#conn.prepared),
     TokenList = case Args of
         [] ->
@@ -185,6 +201,13 @@ execute(Conn, Stmt, Args, Timeout) ->
 
 
 %% internal
+to_binary(String) when is_binary(String) ->
+    String;
+to_binary(String) when is_list(String) ->
+    unicode:characters_to_binary(String);
+to_binary(String) when is_atom(String) ->
+    atom_to_binary(String, utf8).
+
 login(Conn = #conn{env=Env, socket=Socket, packet_size=PktSize}, Timeout) ->
     TokenStream = ?ENCODER:encode_tokens([{login, Env}]),
     DataStream = ?ENCODER:encode_packets(TokenStream, login, PktSize),
@@ -204,7 +227,7 @@ login(Conn = #conn{env=Env, socket=Socket, packet_size=PktSize}, Timeout) ->
 
 system_query(Conn = #conn{state=connected, socket=Socket, 
         packet_size=PktSize}, Query, Timeout) ->
-    BQuery = unicode:characters_to_binary(Query),
+    BQuery = to_binary(Query),
     TokenStream = ?ENCODER:encode_tokens([{language, BQuery}]),
     DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
     case send(Socket, DataStream) of
@@ -234,6 +257,19 @@ handle_prepare_resp(Conn = #conn{prepared = Prepared}, Timeout) ->
             {dynamic, ack, _Status, Id} = TokenDynamic,
             Conn3 = Conn2#conn{
                 prepared = [{Id, ParamsFormat}|Prepared]
+            },
+            {ok, Conn3};
+        Other ->
+            Other
+    end.
+
+handle_unprepare_resp(Conn = #conn{prepared = Prepared}, Timeout) ->
+    case handle_resp(Conn, Timeout) of
+        {ok, TokensBufer, _, Conn2} ->
+            {TokenDynamic, _TokensBufer2} = take_token(dynamic, TokensBufer),
+            {dynamic, ack, _Status, Id} = TokenDynamic,
+            Conn3 = Conn2#conn{
+                prepared = lists:keydelete(Id, 1, Prepared)
             },
             {ok, Conn3};
         Other ->
@@ -283,6 +319,7 @@ handle_loginack_token({loginack, ConnConn, TdsVer, Server}, Conn) ->
     Conn#conn{state = ConnConn, tds_ver = TdsVer, server = Server}.
 
 handle_capability_token({capability, ReqCap, RespCap}, Conn) ->
+    io:format("ReqCap~p; RespCap~p~n", [ReqCap, RespCap]),
     Conn#conn{req_capabilities = ReqCap, resp_capabilities = RespCap}.
 
 handle_done_token({done, Status, _TrnsctConn, Count}, TokensBufer, Results) ->
@@ -295,9 +332,9 @@ handle_done_status([count|Status], Count, TokensBufer, Results) ->
     {Result, TokensBufer2} = take_result(TokensBufer, Count),
     handle_done_status(Status, Count, TokensBufer2, [Result|Results]);
 handle_done_status([proc|Status], Count, TokensBufer, Results) ->
-    Results2 = drop_inproc_updates(Results),
+    %Results2 = drop_inproc_updates(Results),
     {ProcResult, TokensBufer2} = take_procedure_result(TokensBufer),
-    handle_done_status(Status, Count, TokensBufer2, [ProcResult|Results2]);
+    handle_done_status(Status, Count, TokensBufer2, [ProcResult|Results]);
 handle_done_status([Flag|Status], Count, TokensBufer, Results) 
         when Flag =:= event; Flag =:= attn; Flag =:= trans ->
     handle_done_status(Status, Count, TokensBufer, Results);
@@ -334,8 +371,8 @@ take_procedure_result(TokensBufer) ->
     {OutParams, TokensBufer3} = take_token_value(params, TokensBufer2, []),
     {{procedure_result, Status, OutParams}, TokensBufer3}.
 
-drop_inproc_updates(Results) ->
-    lists:filter(fun ({affected_rows, _}) -> false; (_) -> true end, Results).
+%drop_inproc_updates(Results) ->
+%    lists:filter(fun ({affected_rows, _}) -> false; (_) -> true end, Results).
 
 get_field_name(#format{label_name = <<>>, column_name = ColumnName}) ->
     ColumnName;

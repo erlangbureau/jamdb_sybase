@@ -21,10 +21,10 @@ decode_packet(_) ->
 
 decode_token(<<Token, Data/binary>>, TokensBufer) ->
     case Token of
-        ?TDS_TOKEN_ROW ->           decode_row_token(Data, TokensBufer);
+        ?TDS_TOKEN_ROW ->           decode_values_token(Data, TokensBufer);
         ?TDS_TOKEN_PARAMS ->        decode_params_token(Data, TokensBufer);
-        ?TDS_TOKEN_ROWFMT ->        decode_rowformat_token(Data);
-        ?TDS_TOKEN_ROWFMT2 ->       decode_rowformat2_token(Data);
+        ?TDS_TOKEN_ROWFMT ->        decode_valuesformat_token(Data);
+        ?TDS_TOKEN_ROWFMT2 ->       decode_valuesformat2_token(Data);
         ?TDS_TOKEN_PARAMFMT ->      decode_paramsformat_token(Data);
         ?TDS_TOKEN_PARAMFMT2 ->     decode_paramsformat2_token(Data);
         ?TDS_TOKEN_ORDERBY ->       decode_orderby_token(Data);
@@ -42,8 +42,7 @@ decode_token(<<Token, Data/binary>>, TokensBufer) ->
         ?TDS_TOKEN_DYNAMIC ->       decode_dynamic_token(Data);
         ?TDS_TOKEN_DYNAMIC2 ->      decode_dynamic2_token(Data);
         _ ->
-            %io:format("Unknown Token: ~p Data: ~p~n", [Token, Data]),
-            {error, unknown_tds_token}
+            {error, {unknown_tds_token, [{token, Token}, {token_data, Data}]}}
     end.
 
 decode_dynamic_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
@@ -69,9 +68,10 @@ decode_loginack_token(<<_Len:16, Status, TdsVersion:4/binary, SrvNameLen,
 decode_version(<<V1, V2, V3, V4>>) ->
     {V1, V2, V3, V4}.
 
-decode_capability_token(<<_Len:16, 1, ReqLen, Req:ReqLen/binary, 
-        2, RespLen, Resp:RespLen/binary, Rest/binary>>) ->
-    {ok, {capability, [Req], [Resp]}, Rest}.
+decode_capability_token(<<_Len:16, 
+        1, ReqLen, Req:ReqLen/unsigned-unit:8, 
+        2, RespLen, Resp:RespLen/unsigned-unit:8, Rest/binary>>) ->
+    {ok, {capability, Req, Resp}, Rest}.
 
 decode_message_token(<<_Len:16, MsgNumber:32, MsgState, Class, SQLStateLen, 
         SQLState:SQLStateLen/binary, Status, TransactionState:16,
@@ -151,14 +151,8 @@ decode_returnstatus_token(<<Status:32/signed, Rest/binary>>) ->
 
 decode_returnvalue_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     {ok, Format, RestData} = decode_returnvalue_format(TokenData),
-    #format{
-        datatype_group=DatatypeGroup, 
-        datatype_max_len=MaxLen, 
-        usertype_group=UsertypeGroup, 
-        datatype_scale=Scale} = Format,
-    {Value1, <<>>} = decode_datatype(RestData, DatatypeGroup, MaxLen),
-    Value2 = decode_usertype(Value1, UsertypeGroup, Scale),
-    {ok, {returnvalue, Value2}, Rest}.
+    {Value, <<>>} = decode_value(RestData, Format),
+    {ok, {returnvalue, Value}, Rest}.
 
 decode_returnvalue_format(Data) ->
     <<ParamNameLen, ParamName:ParamNameLen/binary,
@@ -167,19 +161,18 @@ decode_returnvalue_format(Data) ->
     F2 = F1#format{
         column_name     = ParamName,
         status          = Status,
-        usertype        = UserType,
-        usertype_group  = get_usertype_group(UserType)
+        usertype        = UserType
     },
     {ok, F2, Rest2}.
 
-decode_rowformat_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
+decode_valuesformat_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     <<RowsAmount:16, TokenRest/binary>> = TokenData,
-    RowFormat = decode_rowformat(TokenRest, []),
+    RowFormat = decode_valuesformat(TokenRest, []),
     {ok, {rowformat, RowsAmount, RowFormat}, Rest}.
 
-decode_rowformat(<<>>, RowFormat) ->
+decode_valuesformat(<<>>, RowFormat) ->
     lists:reverse(RowFormat);
-decode_rowformat(Data, RowFormat) ->
+decode_valuesformat(Data, RowFormat) ->
     <<ParamNameLen, ParamName:ParamNameLen/binary,
         Status, UserType:32/signed, Rest/binary>> = Data,
     {F1, Rest2} = decode_dataformat(Rest),
@@ -188,19 +181,18 @@ decode_rowformat(Data, RowFormat) ->
         column_name     = ParamName,
         status          = Status,
         usertype        = UserType,
-        usertype_group  = get_usertype_group(UserType),
         datatype_locale = LocaleInfo
     },
-    decode_rowformat(Rest3, [F2|RowFormat]).
+    decode_valuesformat(Rest3, [F2|RowFormat]).
 
-decode_rowformat2_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
+decode_valuesformat2_token(<<Len:32, TokenData:Len/binary, Rest/binary>>) ->
     <<RowsAmount:16, TokenRest/binary>> = TokenData,
-    RowFormat = decode_rowformat2(TokenRest, []),
+    RowFormat = decode_valuesformat2(TokenRest, []),
     {ok, {rowformat, RowsAmount, RowFormat}, Rest}.
 
-decode_rowformat2(<<>>, RowsFormat) ->
+decode_valuesformat2(<<>>, RowsFormat) ->
     lists:reverse(RowsFormat);
-decode_rowformat2(Data, RowsFormat) ->
+decode_valuesformat2(Data, RowsFormat) ->
     <<LabelNameLen, LabelName:LabelNameLen/binary,
         CatalogNameLen, CatalogName:CatalogNameLen/binary,
         SchemaNameLen, SchemaName:SchemaNameLen/binary,
@@ -217,10 +209,9 @@ decode_rowformat2(Data, RowsFormat) ->
         column_name     = ColumnName,
         status          = Status,
         usertype        = UserType,
-        usertype_group  = get_usertype_group(UserType),
         datatype_locale = LocaleInfo
     },
-    decode_rowformat2(Rest3, [F2|RowsFormat]).
+    decode_valuesformat2(Rest3, [F2|RowsFormat]).
 
 decode_paramsformat_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     <<ParamsAmount:16, TokenRest/binary>> = TokenData,
@@ -238,7 +229,6 @@ decode_paramsformat(Data, ParamsFormat) ->
         column_name     = ParamName,
         status          = Status,
         usertype        = UserType,
-        usertype_group  = get_usertype_group(UserType),
         datatype_locale = LocaleInfo
     },
     decode_paramsformat(Rest3, [F2|ParamsFormat]).
@@ -259,52 +249,49 @@ decode_paramsformat2(Data, ParamsFormat) ->
         column_name     = ParamName,
         status          = Status,
         usertype        = UserType,
-        usertype_group  = get_usertype_group(UserType),
         datatype_locale = LocaleInfo
     },
     decode_paramsformat2(Rest3, [F2|ParamsFormat]).
 
-decode_row_token(TokenData, TokensBufer) ->
+decode_values_token(TokenData, TokensBufer) ->
     {rowformat, _Amount, RowFormat} = lists:keyfind(rowformat, 1, TokensBufer),
-    {ok, Rows, Rest} = decode_row(TokenData, RowFormat),
+    {ok, Rows, Rest} = decode_values(TokenData, RowFormat),
     {ok, {row, Rows}, Rest}.
 
 decode_params_token(TokenData, TokensBufer) ->
     {paramsformat, _Amount, ParamsFormat} = lists:keyfind(paramsformat,1, TokensBufer),
-    {ok, Params, Rest} = decode_row(TokenData, ParamsFormat),
+    {ok, Params, Rest} = decode_values(TokenData, ParamsFormat),
     {ok, {params, Params}, Rest}.
-
 
 decode_dataformat(<<DataType, Rest/binary>>) ->
     case get_datatype_group(DataType) of
         fixed ->
             Format = #format{
-                datatype_group      = fixed,
                 datatype            = DataType,
-                datatype_max_len    = get_datatype_max_length(DataType)
+                datatype_group      = fixed
             },
             {Format, Rest};
         variable ->
             <<MaxLen, Rest2/binary>> = Rest,
             Format = #format{
-                datatype_group      = variable,
                 datatype            = DataType,
+                datatype_group      = variable,
                 datatype_max_len    = MaxLen
             },
             {Format, Rest2};
         long ->
             <<MaxLen:32, Rest2/binary>> = Rest,
             Format = #format{
-                datatype_group      = long,
                 datatype            = DataType,
+                datatype_group      = long,
                 datatype_max_len    = MaxLen
             },
             {Format, Rest2};
         decimal ->
             <<MaxLen, Precision, Scale, Rest2/binary>> = Rest,
             Format = #format{
-                datatype_group      = decimal,
                 datatype            = DataType,
+                datatype_group      = decimal,
                 datatype_max_len    = MaxLen,
                 datatype_precision  = Precision,
                 datatype_scale      = Scale
@@ -313,110 +300,13 @@ decode_dataformat(<<DataType, Rest/binary>>) ->
         clob ->
             <<MaxLen:32, NLen:16, Name:NLen/binary, Rest2/binary>> = Rest,
             Format = #format{
-                datatype_group      = clob,
                 datatype            = DataType,
+                datatype_group      = clob,
                 datatype_max_len    = MaxLen,
                 datatype_name       = Name
             },
             {Format, Rest2}
     end.
-
-decode_row(Data, RowFormat) ->
-    decode_row(Data, RowFormat, []).
-
-decode_row(Data, [Format|RestRowFormat], Values) ->
-    #format{
-        datatype_group=DatatypeGroup, 
-        datatype_max_len=MaxLen, 
-        usertype_group=UsertypeGroup, 
-        datatype_scale=Scale} = Format,
-    {Value1, RestData} = decode_datatype(Data, DatatypeGroup, MaxLen),
-    Value2 = decode_usertype(Value1, UsertypeGroup, Scale),
-    decode_row(RestData, RestRowFormat, [Value2|Values]);
-decode_row(Data, [], Values) ->
-    {ok, lists:reverse(Values), Data}.
-
-decode_datatype(Data, fixed, MaxLen) ->
-    <<Value:MaxLen/binary, Rest/binary>> = Data,
-    {Value, Rest};
-decode_datatype(Data, variable, _MaxLen) ->
-    <<Length, Value:Length/binary, Rest/binary>> = Data,
-    {Value, Rest};
-decode_datatype(Data, long, _MaxLen) ->
-    <<Length:32, Value:Length/binary, Rest/binary>> = Data,
-    {Value, Rest};
-decode_datatype(Data, decimal, _MaxLen) ->
-    <<Length, Value:Length/binary, Rest/binary>> = Data,
-    {Value, Rest};
-decode_datatype(Data, clob, _MaxLen) ->
-    case Data of
-        <<0, Rest/binary>> ->
-            {<<>>, Rest};
-        <<TPLen, _TxtPtr:TPLen/binary, _TimeStamp:64, Rest1/binary>> ->
-            <<Length:32, Value:Length/binary, Rest2/binary>> = Rest1,
-            {Value, Rest2}
-    end.
-
-decode_usertype(<<>>, _UsertypeGroup, _Scale) ->
-    null;
-decode_usertype(BinValue, binary, _Scale) ->
-    BinValue;
-decode_usertype(BinValue, unsigned_integer, _Scale) ->
-    BitLength = bit_size(BinValue),
-    <<Value:BitLength/unsigned>> = BinValue,
-    Value;
-decode_usertype(BinValue, signed_integer, _Scale) ->
-    BitLength = bit_size(BinValue),
-    <<Value:BitLength/signed>> = BinValue,
-    Value;
-decode_usertype(BinValue, float, _Scale) ->
-    BitLength = bit_size(BinValue),
-    <<Value:BitLength/float>> = BinValue,
-    Value;
-decode_usertype(<<DaysSince1900:32, _/binary>>, date, _Scale) ->
-    {date, calendar:gregorian_days_to_date(693961 + DaysSince1900)};
-decode_usertype(<<Seconds:32>>, time, _Scale) ->
-    {time, calendar:seconds_to_time(Seconds div 300)};
-decode_usertype(<<_:4/binary, Seconds:32>>, time, _Scale) ->
-    {time, calendar:seconds_to_time(Seconds div 300)};
-decode_usertype(<<DaysSince1900:32, Seconds:32>>, datetime, _Scale) ->
-    Date = calendar:gregorian_days_to_date(693961 + DaysSince1900),
-    Time = calendar:seconds_to_time(Seconds div 300),
-    {Date, Time};
-decode_usertype(<<DaysSince1900:16, Seconds:16>>, datetime, _Scale) ->
-    Date = calendar:gregorian_days_to_date(693961 + DaysSince1900),
-    Time = calendar:seconds_to_time(Seconds * 60),
-    {Date, Time};
-decode_usertype(BinValue, decimal, 0) ->
-    BitLength = bit_size(BinValue) - 8,
-    case BinValue of
-        <<0:8,Value:BitLength>> ->
-            Value;
-        <<1:8,Value:BitLength>> ->
-            -Value
-    end;
-decode_usertype(BinValue, decimal, Scale) ->
-    BitLength = bit_size(BinValue) - 8,
-    case BinValue of
-        <<0:8,Value:BitLength>> ->
-            {decimal, Value, Scale};
-        <<1:8,Value:BitLength>> ->
-            {decimal, -Value, Scale}
-    end.
-
-get_datatype_max_length(?TDS_TYPE_UINT2)        -> 2;
-get_datatype_max_length(?TDS_TYPE_UINT4)        -> 4;
-get_datatype_max_length(?TDS_TYPE_UINT8)        -> 8;
-get_datatype_max_length(?TDS_TYPE_INT1)         -> 1;
-get_datatype_max_length(?TDS_TYPE_INT2)         -> 2;
-get_datatype_max_length(?TDS_TYPE_INT4)         -> 4;
-get_datatype_max_length(?TDS_TYPE_INT8)         -> 8;
-get_datatype_max_length(?TDS_TYPE_FLT4)         -> 4;
-get_datatype_max_length(?TDS_TYPE_FLT8)         -> 8;
-get_datatype_max_length(?TDS_TYPE_DATE)         -> 4;
-get_datatype_max_length(?TDS_TYPE_TIME)         -> 4;
-get_datatype_max_length(?TDS_TYPE_SHORTDATE)    -> 4;
-get_datatype_max_length(?TDS_TYPE_DATETIME)     -> 8.
 
 get_datatype_group(?TDS_TYPE_INT1)              -> fixed;
 get_datatype_group(?TDS_TYPE_INT2)              -> fixed;
@@ -453,36 +343,161 @@ get_datatype_group(?TDS_TYPE_DECN)              -> decimal;
 get_datatype_group(?TDS_TYPE_TEXT)              -> clob;
 get_datatype_group(?TDS_TYPE_IMAGE)             -> clob.
 
-get_usertype_group(?USER_TYPE_CHAR)             -> binary;
-get_usertype_group(?USER_TYPE_NCHAR)            -> binary;
-get_usertype_group(?USER_TYPE_VARCHAR)          -> binary;
-get_usertype_group(?USER_TYPE_NVARCHAR)         -> binary;
-get_usertype_group(?USER_TYPE_BINARY)           -> binary;
-get_usertype_group(?USER_TYPE_VARBINARY)        -> binary;
-get_usertype_group(?USER_TYPE_TEXT)             -> binary;
-get_usertype_group(?USER_TYPE_SMALLINT)         -> signed_integer;
-get_usertype_group(?USER_TYPE_INT)              -> signed_integer;
-get_usertype_group(?USER_TYPE_BIGINT)           -> signed_integer;
-get_usertype_group(?USER_TYPE_INTN)             -> signed_integer;
-get_usertype_group(?USER_TYPE_TINYINT)          -> unsigned_integer;
-get_usertype_group(?USER_TYPE_USMALLINT)        -> unsigned_integer;
-get_usertype_group(?USER_TYPE_UINT)             -> unsigned_integer;
-get_usertype_group(?USER_TYPE_UBIGINT)          -> unsigned_integer;
-get_usertype_group(?USER_TYPE_UNSIGNED_SHORT)   -> unsigned_integer;
-get_usertype_group(?USER_TYPE_UNSIGNED_INT)     -> unsigned_integer;
-get_usertype_group(?USER_TYPE_UNSIGNED_LONG)    -> unsigned_integer;
-get_usertype_group(?USER_TYPE_FLOAT)            -> float;
-get_usertype_group(?USER_TYPE_REAL)             -> float;
-get_usertype_group(?USER_TYPE_NUMERIC)          -> decimal;
-get_usertype_group(?USER_TYPE_NUMERICN)         -> decimal;
-get_usertype_group(?USER_TYPE_DECIMAL)          -> decimal;
-get_usertype_group(?USER_TYPE_DECIMALN)         -> decimal;
-get_usertype_group(?USER_TYPE_SMALLMONEY)       -> money;
-get_usertype_group(?USER_TYPE_MONEY)            -> money;
-get_usertype_group(?USER_TYPE_DATE)             -> date;
-get_usertype_group(?USER_TYPE_LONGDATE)         -> date;
-get_usertype_group(?USER_TYPE_TIME)             -> time;
-get_usertype_group(?USER_TYPE_LONGTIME)         -> time;
-get_usertype_group(?USER_TYPE_DATETIME)         -> datetime;
-get_usertype_group(?USER_TYPE_SMALLDATETIME)    -> datetime;
-get_usertype_group(_)                           -> signed_integer.
+decode_values(Data, RowFormat) ->
+    decode_values(Data, RowFormat, []).
+
+decode_values(Data, [Format|RestRowFormat], Values) ->
+    {Value, RestData} = decode_value(Data, Format),
+    decode_values(RestData, RestRowFormat, [Value|Values]);
+decode_values(Data, [], Values) ->
+    {ok, lists:reverse(Values), Data}.
+
+decode_value(Data, #format{datatype=?TDS_TYPE_INTN}) ->
+    case Data of
+        <<0, Rest/binary>> ->
+            {null, Rest};
+        <<1, Value:1/unsigned-unit:8, Rest/binary>> ->
+            {Value, Rest};
+        <<Length, Value:Length/signed-unit:8, Rest/binary>> ->
+            {Value, Rest}
+    end;
+decode_value(Data, #format{datatype=?TDS_TYPE_INT1}) ->
+    <<Value:8/unsigned, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_INT2}) ->
+    <<Value:16/signed, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_INT4}) ->
+    <<Value:32/signed, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_INT8}) ->
+    <<Value:64/signed, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_UINTN}) ->
+    <<Length, Value:Length/unsigned-unit:8, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_UINT2}) ->
+    <<Value:16/unsigned, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_UINT4}) ->
+    <<Value:32/unsigned, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_UINT8}) ->
+    <<Value:64/unsigned, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_NUMN, datatype_scale=Scale}) ->
+    <<Length, Value:Length/binary, Rest/binary>> = Data,
+    {decode_decimal(Value, Scale), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_DECN, datatype_scale=Scale}) ->
+    <<Length, Value:Length/binary, Rest/binary>> = Data,
+    {decode_decimal(Value, Scale), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_CHAR}) ->
+    <<Length, Value:Length/binary, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_VARCHAR}) ->
+    <<Length, Value:Length/binary, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_BINARY}) ->
+    <<Length, Value:Length/binary, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_VARBINARY}) ->
+    <<Length, Value:Length/binary, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_FLTN}) ->
+    <<Length, Value:Length/float-unit:8, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_FLT4}) ->
+    <<Value:32/float, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_FLT8}) ->
+    <<Value:64/float, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_SHORTDATE}) ->
+    <<DaysSince1900:16/unsigned, Seconds:16/unsigned, Rest/binary>> = Data,
+    Date = decode_date(DaysSince1900),
+    Time = decode_time(Seconds, seconds),
+    {{Date, Time}, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_DATETIME}) ->
+    <<DaysSince1900:32/unsigned, MlSeconds:32/unsigned, Rest/binary>> = Data,
+    Date = decode_date(DaysSince1900),
+    Time = decode_time(MlSeconds, milliseconds),
+    {{Date, Time}, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_DATE}) ->
+    <<DaysSince1900:32/unsigned, Rest/binary>> = Data,
+    {decode_date(DaysSince1900), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_TIME}) ->
+    <<MlSeconds:32/unsigned, Rest/binary>> = Data,
+    {decode_time(MlSeconds, milliseconds), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_DATETIMEN}) ->
+    case Data of
+        <<0, Rest/binary>> ->
+            {null, Rest};
+        <<4, DaysSince1900:16/unsigned, Seconds:16/unsigned, Rest/binary>> ->
+                Date = decode_date(DaysSince1900),
+                Time = decode_time(Seconds, seconds),
+                {{Date, Time}, Rest};
+        <<8, DaysSince1900:32/unsigned, MlSeconds:32/unsigned, Rest/binary>> ->
+                Date = decode_date(DaysSince1900),
+                Time = decode_time(MlSeconds, milliseconds),
+                {{Date, Time}, Rest}
+    end;
+decode_value(Data, #format{datatype=?TDS_TYPE_DATEN}) ->
+    <<Length, DaysSince1900:Length/unsigned-unit:8, Rest/binary>> = Data,
+    Date = decode_date(DaysSince1900),
+    {decode_nullable(Length, Date), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_TIMEN}) ->
+    <<Length, MlSeconds:Length/unsigned-unit:8, Rest/binary>> = Data,
+    Time = decode_time(MlSeconds, milliseconds),
+    {decode_nullable(Length, Time), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_MONEYN}) ->
+    <<Length, Value:Length/float-unit:8, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_SHORTMONEY}) ->
+    <<Value:32/float, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_MONEY}) ->
+    <<Value:64/float, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_BIT}) ->
+    <<Value:8/unsigned, Rest/binary>> = Data,
+    {Value, Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_LONGCHAR}) ->
+    <<Length:32, Value:Length/binary, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_LONGBINARY}) ->
+    <<Length:32, Value:Length/binary, Rest/binary>> = Data,
+    {decode_nullable(Length, Value), Rest};
+decode_value(Data, #format{datatype=?TDS_TYPE_TEXT}) ->
+    case Data of
+        <<0, Rest/binary>> ->
+            {null, Rest};
+        <<TPLen, _TxtPtr:TPLen/binary, _TimeStamp:64, Length:32, 
+                Value:Length/binary, Rest/binary>> ->
+            {Value, Rest}
+    end.
+
+decode_date(DaysSince1900) ->
+    calendar:gregorian_days_to_date(693961 + DaysSince1900).
+
+decode_time(Seconds, seconds) ->
+    calendar:seconds_to_time(Seconds * 60);
+decode_time(Seconds, milliseconds) ->
+    calendar:seconds_to_time(Seconds div 300).
+
+decode_decimal(<<>>, _) ->
+    null;
+decode_decimal(Data, 0) ->
+    Bits = bit_size(Data) - 8,
+    case Data of
+        <<0:8, Value:Bits>> -> Value;
+        <<1:8, Value:Bits>> -> -Value
+    end;
+decode_decimal(Data, Scale) ->
+    Bits = bit_size(Data) - 8,
+    case Data of
+        <<0:8, Value:Bits>> -> {decimal, Value, Scale};
+        <<1:8, Value:Bits>> -> {decimal, -Value, Scale}
+    end.
+
+decode_nullable(0, _Value) ->       null;
+decode_nullable(_Length, Value) ->  Value.
