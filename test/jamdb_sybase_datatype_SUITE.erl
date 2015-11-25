@@ -362,9 +362,9 @@ fractional_numeric(Config) ->
     TestCases = [
         %% source value, result value
         %% case 1
-        { {decimal, "1"}, {decimal, 100, 2}},
+        {{decimal, "1"}, {decimal, 100, 2}},
         %% case 2
-        { {decimal, "999999999999999999999999999999999999.99"}, {decimal, 99999999999999999999999999999999999999, 2} },
+        {{decimal, "999999999999999999999999999999999999.99"}, {decimal, 99999999999999999999999999999999999999, 2} },
         %% case 3
         {{decimal, "-999999999999999999999999999999999999.99"}, {decimal, -99999999999999999999999999999999999999, 2} }
     ],
@@ -379,9 +379,9 @@ fractional_nullable_numeric(Config) ->
         %% case 1
         {null, null},
         %% case 2
-        { {decimal, "1"}, {decimal, 100, 2}},
+        {{decimal, "1"}, {decimal, 100, 2}},
         %% case 3
-        { {decimal, "999999999999999999999999999999999999.99"}, {decimal, 99999999999999999999999999999999999999, 2} },
+        {{decimal, "999999999999999999999999999999999999.99"}, {decimal, 99999999999999999999999999999999999999, 2} },
         %% case 4
         {{decimal, "-999999999999999999999999999999999999.99"}, {decimal, -99999999999999999999999999999999999999, 2} }
     ],
@@ -850,7 +850,7 @@ date(Config) ->
     TestCases = [
         %% source value, result value
         %% case 1
-        {"2013-08-01", {date, {2013,8,1}} }
+        {"2013-08-01", {2013,8,1} }
     ],
     run_testcases(ConnRef, Table, Key, TestCases).
 
@@ -863,9 +863,9 @@ nulable_date(Config) ->
         %% case 1
         {null, null},
         %% case 2
-        {"2013-08-01", {date, {2013,8,1}} },
+        {"2013-08-01", {2013,8,1} },
         %% case 3
-        {"2013-08-01 16:00:00", {date, {2013,8,1}} }
+        {"2013-08-01 16:00:00", {2013,8,1} }
     ],
     run_testcases(ConnRef, Table, Key, TestCases).
 
@@ -876,9 +876,9 @@ time(Config) ->
     TestCases = [
         %% source value, result value
         %% case 1
-        {"16:00:00", {time,{16,0,0}} },
+        {"16:00:00", {16,0,0} },
         %% case 2
-        {"2013-08-01 16:00:00", {time,{16,0,0}} }
+        {"2013-08-01 16:00:00", {16,0,0} }
     ],
     run_testcases(ConnRef, Table, Key, TestCases).
 
@@ -891,9 +891,9 @@ nulable_time(Config) ->
         %% case 1
         {null, null},
         %% case 2
-        {"16:00:00", {time,{16,0,0}} },
+        {"16:00:00", {16,0,0} },
         %% case 3
-        {"2013-08-01 16:00:00", {time,{16,0,0}} }
+        {"2013-08-01 16:00:00", {16,0,0} }
     ],
     run_testcases(ConnRef, Table, Key, TestCases).
 

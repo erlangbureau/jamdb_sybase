@@ -319,26 +319,27 @@ handle_loginack_token({loginack, ConnConn, TdsVer, Server}, Conn) ->
     Conn#conn{state = ConnConn, tds_ver = TdsVer, server = Server}.
 
 handle_capability_token({capability, ReqCap, RespCap}, Conn) ->
-    io:format("ReqCap~p; RespCap~p~n", [ReqCap, RespCap]),
+    %io:format("ReqCap~p; RespCap~p~n", [ReqCap, RespCap]),
     Conn#conn{req_capabilities = ReqCap, resp_capabilities = RespCap}.
 
 handle_done_token({done, Status, _TrnsctConn, Count}, TokensBufer, Results) ->
     TokensBuferR = lists:reverse(TokensBufer),
     handle_done_status(Status, Count, TokensBuferR, Results).
 
-handle_done_status([more|_], _Count, TokensBufer, Results) ->
+handle_done_status([?TDS_DONE_MORE|_], _Count, TokensBufer, Results) ->
     {next_token, lists:reverse(TokensBufer), Results};
-handle_done_status([count|Status], Count, TokensBufer, Results) ->
+handle_done_status([?TDS_DONE_COUNT|Status], Count, TokensBufer, Results) ->
     {Result, TokensBufer2} = take_result(TokensBufer, Count),
     handle_done_status(Status, Count, TokensBufer2, [Result|Results]);
-handle_done_status([proc|Status], Count, TokensBufer, Results) ->
-    %Results2 = drop_inproc_updates(Results),
+handle_done_status([?TDS_DONE_PROC|Status], Count, TokensBufer, Results) ->
+    Results2 = drop_inproc_updates(Results),
     {ProcResult, TokensBufer2} = take_procedure_result(TokensBufer),
-    handle_done_status(Status, Count, TokensBufer2, [ProcResult|Results]);
+    handle_done_status(Status, Count, TokensBufer2, [ProcResult|Results2]);
 handle_done_status([Flag|Status], Count, TokensBufer, Results) 
-        when Flag =:= event; Flag =:= attn; Flag =:= trans ->
+        when Flag =:= ?TDS_DONE_EVENT; Flag =:= ?TDS_DONE_ATTN; 
+                Flag =:= ?TDS_DONE_INXACT ->
     handle_done_status(Status, Count, TokensBufer, Results);
-handle_done_status([error|_Status], _Count, TokensBufer, _Results) ->
+handle_done_status([?TDS_DONE_ERROR|_Status], _Count, TokensBufer, _Results) ->
     {Message, _} = take_token(message, TokensBufer), 
         %% TODO check that the class > 10
     {error, remote, Message};
@@ -371,8 +372,8 @@ take_procedure_result(TokensBufer) ->
     {OutParams, TokensBufer3} = take_token_value(params, TokensBufer2, []),
     {{procedure_result, Status, OutParams}, TokensBufer3}.
 
-%drop_inproc_updates(Results) ->
-%    lists:filter(fun ({affected_rows, _}) -> false; (_) -> true end, Results).
+drop_inproc_updates(Results) ->
+    lists:filter(fun ({affected_rows, _}) -> false; (_) -> true end, Results).
 
 get_field_name(#format{label_name = <<>>, column_name = ColumnName}) ->
     ColumnName;
@@ -391,7 +392,7 @@ handle_envchange_token({envchange, EnvChange}, Conn) ->
     lists:foldl(fun set_env/2, Conn, EnvChange).
 
 set_env({packet_size = Key, NewValue, _OldValue}, Conn) ->
-    Value = list_to_integer(binary_to_list(NewValue)), %%TODO
+    Value = list_to_integer(binary_to_list(NewValue)),
     _ = inet:setopts(Conn#conn.socket, [{buffer, Value}]),
     Env = lists:keystore(Key, 1, Conn#conn.env, {Key, Value}), 
     Conn#conn{env = Env, packet_size = Value};
