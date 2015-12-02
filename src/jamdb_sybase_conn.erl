@@ -8,7 +8,7 @@
 -export([prepare/3, unprepare/2]).
 -export([execute/3, execute/4]).
 
--include("TDS_5_0.hrl").
+-include("TDS_constants.hrl").
 -include("jamdb_sybase.hrl").
 -include("jamdb_sybase_defaults.hrl").
 
@@ -54,6 +54,7 @@
         {lib_name, string()} |
         {language, string()} |
         {packet_size, non_neg_integer()}.
+        %% TODO add message_handler
 -type options() :: [env()].
 
 -export_type([state/0]).
@@ -100,7 +101,7 @@ disconnect(#conn{state=connected, socket=Socket, env=Env}, 0) ->
 disconnect(Conn = #conn{state=connected, socket=Socket, env=Env,
         packet_size=PktSize}, Timeout) ->
     TokenStream = ?ENCODER:encode_tokens([{logout, []}]),
-    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, normal, PktSize),
     try send(Socket, DataStream) of
         ok -> handle_empty_resp(Conn, Timeout);
         {error, _Reason} -> ok
@@ -125,7 +126,7 @@ sql_query(Conn = #conn{state=connected, socket=Socket,
         packet_size=PktSize}, Query, Timeout) ->
     BQuery = to_binary(Query),
     TokenStream = ?ENCODER:encode_tokens([{language, BQuery}]),
-    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, normal, PktSize),
     case send(Socket, DataStream) of
         ok              -> handle_query_resp(Conn, Timeout);
         {error, Reason} -> handle_error(socket, Reason, Conn)
@@ -143,7 +144,7 @@ prepare(Conn = #conn{state=connected, socket=Socket,
     BQuery2 = <<"create proc ", BStmtId/binary, " as ", BQuery/binary>>,
     TokenList = [{dynamic, prepare, [], BStmtId, BQuery2}],
     TokenStream = ?ENCODER:encode_tokens(TokenList),
-    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, normal, PktSize),
     case send(Socket, DataStream) of
         ok              -> handle_prepare_resp(Conn, ?DEF_TIMEOUT);
         {error, Reason} -> handle_error(socket, Reason, Conn)
@@ -159,7 +160,7 @@ unprepare(Conn = #conn{state=connected, socket=Socket,
     BStmtId = to_binary(StmtId),
     TokenList = [{dynamic, unprepare, [], BStmtId, <<>>}],
     TokenStream = ?ENCODER:encode_tokens(TokenList),
-    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, normal, PktSize),
     case send(Socket, DataStream) of
         ok              -> handle_unprepare_resp(Conn, ?DEF_TIMEOUT);
         {error, Reason} -> handle_error(socket, Reason, Conn)
@@ -176,11 +177,11 @@ execute(Conn, Stmt, Args) ->
 execute(Conn = #conn{state=connected, socket=Socket,
         packet_size=PktSize}, StmtId, Args, Timeout) ->
     BStmtId = to_binary(StmtId),
-    TokenParamsFmt = proplists:get_value(BStmtId, Conn#conn.prepared),
     TokenList = case Args of
         [] ->
             [{dynamic, execute, [], BStmtId, <<>>}];
         _ ->
+            TokenParamsFmt = proplists:get_value(BStmtId, Conn#conn.prepared),
             [
                 {dynamic, execute, [?TDS_DYNAMIC_HASARGS], BStmtId, <<>>},
                 TokenParamsFmt,
@@ -188,9 +189,9 @@ execute(Conn = #conn{state=connected, socket=Socket,
             ]
     end,
     TokenStream = ?ENCODER:encode_tokens(TokenList),
-    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, normal, PktSize),
     case send(Socket, DataStream) of
-        ok              -> handle_query_resp(Conn, Timeout);
+        ok              -> handle_execute_resp(Conn, Timeout);
         {error, Reason} -> handle_error(socket, Reason, Conn)
     end;
 execute(Conn, Stmt, Args, Timeout) ->
@@ -229,7 +230,7 @@ system_query(Conn = #conn{state=connected, socket=Socket,
         packet_size=PktSize}, Query, Timeout) ->
     BQuery = to_binary(Query),
     TokenStream = ?ENCODER:encode_tokens([{language, BQuery}]),
-    DataStream = ?ENCODER:encode_packets(TokenStream, 'query', PktSize),
+    DataStream = ?ENCODER:encode_packets(TokenStream, normal, PktSize),
     case send(Socket, DataStream) of
         ok              -> handle_empty_resp(Conn, Timeout);
         {error, Reason} -> handle_error(socket, Reason, Conn)
@@ -254,9 +255,10 @@ handle_prepare_resp(Conn = #conn{prepared = Prepared}, Timeout) ->
         {ok, TokensBufer, _, Conn2} ->
             {TokenDynamic, TokensBufer2} = take_token(dynamic, TokensBufer),
             {ParamsFormat, _TokensBufer3} = take_token(paramsformat, TokensBufer2),
+            ParamsFormat2 = ?ENCODER:prepare_input_dataformat(ParamsFormat),
             {dynamic, ack, _Status, Id} = TokenDynamic,
             Conn3 = Conn2#conn{
-                prepared = [{Id, ParamsFormat}|Prepared]
+                prepared = [{Id, ParamsFormat2}|Prepared]
             },
             {ok, Conn3};
         Other ->
@@ -279,6 +281,15 @@ handle_unprepare_resp(Conn = #conn{prepared = Prepared}, Timeout) ->
 handle_query_resp(Conn, Timeout) ->
     case handle_resp(Conn, Timeout) of
         {ok, _TokensBufer, Result, Conn2} ->
+            %Result2 = drop_inproc_updates(Result),
+            {ok, Result, Conn2};
+        Error -> Error
+    end.
+
+handle_execute_resp(Conn, Timeout) ->
+    case handle_resp(Conn, Timeout) of
+        {ok, _TokensBufer, Result, Conn2} ->
+            %Result2 = drop_inproc_updates(Result),
             {ok, Result, Conn2};
         Error -> Error
     end.
@@ -286,31 +297,36 @@ handle_query_resp(Conn, Timeout) ->
 handle_resp(Conn = #conn{socket=Socket}, Timeout) ->
     case recv(Socket, Timeout) of
         {ok, BinaryData} ->
-            decode_token_stream(BinaryData, [], [], Conn);
+            decode_stream(BinaryData, [], [], Conn);
         {error, Reason} ->
             handle_error(socket, Reason, Conn)
     end.
 
-decode_token_stream(Stream, TokensBufer, Results, Conn) ->
+decode_stream(Stream, TokensBufer, Results, Conn) ->
     case ?DECODER:decode_token(Stream, TokensBufer) of
-        {ok, Token, Stream2} when element(1, Token) =:= done ->
-            case handle_done_token(Token, TokensBufer, Results) of
-                {next_token, TokensBufer2, Results2} ->
-                    decode_token_stream(Stream2, TokensBufer2, Results2, Conn);
-                Result ->
-                    erlang:append_element(Result, Conn)
-            end;
-        {ok, Token, Stream2} when element(1, Token) =:= loginack ->
-            Conn2 = handle_loginack_token(Token, Conn),
-            decode_token_stream(Stream2, TokensBufer, Results, Conn2);
-        {ok, Token, Stream2} when element(1, Token) =:= capability ->
-            Conn2 = handle_capability_token(Token, Conn),
-            decode_token_stream(Stream2, TokensBufer, Results, Conn2);
-        {ok, Token, Stream2} when element(1, Token) =:= envchange ->
-            Conn2 = handle_envchange_token(Token, Conn),
-            decode_token_stream(Stream2, TokensBufer, Results, Conn2);
         {ok, Token, Stream2} ->
-            decode_token_stream(Stream2, [Token|TokensBufer], Results, Conn);
+            case element(1, Token) of
+            Done when Done == done; Done == doneinproc; Done == doneproc ->
+                io:format("TokensBufer~p~n", [TokensBufer]),
+                io:format("DoneToken ~p~n", [Token]),
+                case handle_done_token(Token, TokensBufer, Results) of
+                    {next_token, Results2} ->
+                        decode_stream(Stream2, [], Results2, Conn);
+                    Result ->
+                        erlang:append_element(Result, Conn)
+                end;
+            loginack ->
+                Conn2 = handle_loginack_token(Token, Conn),
+                decode_stream(Stream2, TokensBufer, Results, Conn2);
+            capability ->
+                Conn2 = handle_capability_token(Token, Conn),
+                decode_stream(Stream2, TokensBufer, Results, Conn2);
+            envchange ->
+                Conn2 = handle_envchange_token(Token, Conn),
+                decode_stream(Stream2, TokensBufer, Results, Conn2);
+            _ ->
+                decode_stream(Stream2, [Token|TokensBufer], Results, Conn)
+            end;
         {error, Reason} ->
             handle_error(local, Reason, Conn)
     end.
@@ -318,16 +334,19 @@ decode_token_stream(Stream, TokensBufer, Results, Conn) ->
 handle_loginack_token({loginack, ConnConn, TdsVer, Server}, Conn) ->
     Conn#conn{state = ConnConn, tds_ver = TdsVer, server = Server}.
 
-handle_capability_token({capability, ReqCap, RespCap}, Conn) ->
-    %io:format("ReqCap~p; RespCap~p~n", [ReqCap, RespCap]),
-    Conn#conn{req_capabilities = ReqCap, resp_capabilities = RespCap}.
+handle_capability_token({capability, SrvReqCap, SrvRespCap}, Conn) ->
+    %ReqCap = ?JAMDB_REQ_CAP -- SrvReqCap,
+    %RespCap = ?JAMDB_RESP_CAP -- SrvRespCap,
+    %io:format("ReqCap~p~n", [ReqCap]),
+    %io:format("RespCap~p~n", [RespCap]),
+    Conn#conn{req_capabilities = SrvReqCap, resp_capabilities = SrvRespCap}.
 
-handle_done_token({done, Status, _TrnsctConn, Count}, TokensBufer, Results) ->
+handle_done_token({_, Status, _TrnsctConn, Count}, TokensBufer, Results) ->
     TokensBuferR = lists:reverse(TokensBufer),
     handle_done_status(Status, Count, TokensBuferR, Results).
 
-handle_done_status([?TDS_DONE_MORE|_], _Count, TokensBufer, Results) ->
-    {next_token, lists:reverse(TokensBufer), Results};
+handle_done_status([?TDS_DONE_MORE|_], _Count, _TokensBufer, Results) ->
+    {next_token, Results};
 handle_done_status([?TDS_DONE_COUNT|Status], Count, TokensBufer, Results) ->
     {Result, TokensBufer2} = take_result(TokensBufer, Count),
     handle_done_status(Status, Count, TokensBufer2, [Result|Results]);

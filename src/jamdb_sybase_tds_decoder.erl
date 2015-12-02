@@ -4,7 +4,7 @@
 -export([decode_packet/1]).
 -export([decode_token/2]).
 
--include("TDS_5_0.hrl").
+-include("TDS_constants.hrl").
 -include("jamdb_sybase.hrl").
 
 %% API
@@ -29,9 +29,9 @@ decode_token(<<Token, Data/binary>>, TokensBufer) ->
         ?TDS_TOKEN_PARAMFMT2 ->     decode_paramsformat2_token(Data);
         ?TDS_TOKEN_ORDERBY ->       decode_orderby_token(Data);
         ?TDS_TOKEN_ORDERBY2 ->      decode_orderby2_token(Data);
-        ?TDS_TOKEN_DONE ->          decode_done_token(Data);
-        ?TDS_TOKEN_DONEINPROC ->    decode_done_token(Data);
-        ?TDS_TOKEN_DONEPROC ->      decode_done_token(Data);
+        ?TDS_TOKEN_DONE ->          decode_done_token(Data, done);
+        ?TDS_TOKEN_DONEINPROC ->    decode_done_token(Data, doneinproc);
+        ?TDS_TOKEN_DONEPROC ->      decode_done_token(Data, doneproc);
         ?TDS_TOKEN_LOGINACK ->      decode_loginack_token(Data);
         ?TDS_TOKEN_CAPABILITY ->    decode_capability_token(Data);
         ?TDS_TOKEN_EED ->           decode_message_token(Data);
@@ -68,10 +68,11 @@ decode_loginack_token(<<_Len:16, Status, TdsVersion:4/binary, SrvNameLen,
 decode_version(<<V1, V2, V3, V4>>) ->
     {V1, V2, V3, V4}.
 
-decode_capability_token(<<_Len:16, 
-        1, ReqLen, Req:ReqLen/unsigned-unit:8, 
-        2, RespLen, Resp:RespLen/unsigned-unit:8, Rest/binary>>) ->
-    {ok, {capability, Req, Resp}, Rest}.
+decode_capability_token(<<_Len:16, 1, ReqLen, Req:ReqLen/unit:8, 2, RespLen, 
+        Resp:RespLen/unit:8, Rest/binary>>) ->
+    ReqCap = decode_valuemask(Req),
+    RespCap = decode_valuemask(Resp),
+    {ok, {capability, ReqCap, RespCap}, Rest}.
 
 decode_message_token(<<_Len:16, MsgNumber:32, MsgState, Class, SQLStateLen, 
         SQLState:SQLStateLen/binary, Status, TransactionState:16,
@@ -110,9 +111,9 @@ decode_control_token(<<Len:16, TokenData:Len/binary, Rest/binary>>) ->
     Fmts = [ Fmt || <<Length, Fmt:Length/binary>> <= TokenData],
     {ok, {control, lists:reverse(Fmts)}, Rest}.
 
-decode_done_token(<<Status:16, TransState:16, AffectedRows:32, Rest/binary>>) ->
+decode_done_token(<<Status:16, TransState:16, Count:32, Rest/binary>>, Type) ->
     StatusFlags = decode_bitmask(Status),
-    {ok, {done, StatusFlags, TransState, AffectedRows}, Rest}.
+    {ok, {Type, StatusFlags, TransState, Count}, Rest}.
 
 decode_orderby_token(<<Columns:16, Rest/binary>>) ->
     {ok, Order, Rest2} = decode_orderby_sequence(Rest, 8, Columns, []),
@@ -323,6 +324,7 @@ get_datatype_group(?TDS_TYPE_LONGBINARY)        -> long;
 get_datatype_group(?TDS_TYPE_NUMN)              -> decimal;
 get_datatype_group(?TDS_TYPE_DECN)              -> decimal;
 get_datatype_group(?TDS_TYPE_TEXT)              -> clob;
+get_datatype_group(?TDS_TYPE_UNITEXT)           -> clob;
 get_datatype_group(?TDS_TYPE_IMAGE)             -> clob.
 
 decode_bitmask(BitMask) ->
@@ -331,11 +333,25 @@ decode_bitmask(BitMask) ->
 decode_bitmask(BitMask, Flag, Result) when BitMask < Flag ->
     Result;
 decode_bitmask(BitMask, Flag, Result) ->
-    Result2 = if 
-        BitMask band Flag == Flag   -> [Flag|Result];
-        true                        -> Result
+    IsSet = ((BitMask band Flag) == Flag),
+    Result2 = case IsSet of
+        true  -> [Flag|Result];
+        false -> Result
     end,
     decode_bitmask(BitMask, Flag*2, Result2).
+
+decode_valuemask(ValueMask) ->
+    decode_valuemask(ValueMask, 1, []).
+
+decode_valuemask(ValueMask, Value, Result) when ValueMask < 1 bsl Value ->
+    Result;
+decode_valuemask(ValueMask, Value, Result) ->
+    IsSet = ((ValueMask bsr Value) band 1) == 1,
+    Result2 = case IsSet of
+        true  -> [Value|Result];
+        false -> Result
+    end,
+    decode_valuemask(ValueMask, Value+1, Result2).
 
 decode_values(Data, RowFormat) ->
     decode_values(Data, RowFormat, []).
@@ -472,13 +488,9 @@ decode_value(Data, #format{datatype=?TDS_TYPE_LONGBINARY}, Nullable) ->
     <<Length:32, Value:Length/binary, Rest/binary>> = Data,
     {decode_nullable(Length, Value, Nullable), Rest};
 decode_value(Data, #format{datatype=?TDS_TYPE_TEXT}, _Nullable) ->
-    case Data of
-        <<0, Rest/binary>> ->
-            {null, Rest};
-        <<TPLen, _TxtPtr:TPLen/binary, _TimeStamp:64, Length:32, 
-                Value:Length/binary, Rest/binary>> ->
-            {Value, Rest}
-    end.
+    decode_text(Data, utf8);
+decode_value(Data, #format{datatype=?TDS_TYPE_UNITEXT}, _Nullable) ->
+    decode_text(Data, utf16).
 
 decode_date(DaysSince1900) ->
     calendar:gregorian_days_to_date(693961 + DaysSince1900).
@@ -499,9 +511,19 @@ decode_decimal(Data, 0) ->
 decode_decimal(Data, Scale) ->
     Bits = bit_size(Data) - 8,
     case Data of
-        <<0:8, Value:Bits>> -> {decimal, Value, Scale};
-        <<1:8, Value:Bits>> -> {decimal, -Value, Scale}
+        <<0:8, Value:Bits>> -> {0, Value, -Scale};
+        <<1:8, Value:Bits>> -> {1, Value, -Scale}
     end.
+
+decode_text(<<0, Rest/binary>>, _) ->
+    {null, Rest};
+decode_text(<<TPLen, _TxtPtr:TPLen/binary, _TimeStamp:8/binary, 
+        Length:32, Value:Length/binary, Rest/binary>>, utf8) ->
+    {Value, Rest};
+decode_text(<<TPLen, _TxtPtr:TPLen/binary, _TimeStamp:8/binary, 
+        Length:32, Value:Length/binary, Rest/binary>>, utf16) ->
+    Value2 = unicode:characters_to_binary(Value, utf16),
+    {Value2, Rest}.
 
 decode_nullable(0, _Value, true) ->    null;
 decode_nullable(0, Value, false) ->    Value;
